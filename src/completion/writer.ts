@@ -8,18 +8,20 @@
  * no directory creation; containment-bound with point-of-use revalidation.
  *
  * DESCRIPTOR-ANCHORED CONTAINMENT (SIR-WP13B-003; the established
- * WP-11/WP-6 point-of-use pattern): the verified workspace root is opened
- * O_RDONLY|O_DIRECTORY|O_NOFOLLOW and retained as a descriptor for the
- * whole operation; every directory component of the destination chain is
- * opened RELATIVE TO the previously verified descriptor
- * (`/proc/self/fd/<fd>/<component>`) with O_DIRECTORY|O_NOFOLLOW,
+ * WP-11/WP-6 point-of-use pattern; MAC-2C Darwin integration): the
+ * verified workspace root is opened O_RDONLY|O_DIRECTORY|O_NOFOLLOW and
+ * retained as a descriptor for the whole operation; every directory
+ * component of the destination chain is opened RELATIVE TO the previously
+ * verified descriptor — on Darwin, one single-component
+ * `openat(O_DIRECTORY|O_NOFOLLOW)` per component through the accepted
+ * native seam (`src/internal/darwin-fs/writer.ts`, MAC-1 addon) —
  * fstat-verified (directory, service uid), and resolution-path verified
- * (`readlink(/proc/self/fd/<fd>)` must equal the expected canonical path)
- * — an intermediate component replaced by a symlink diverges here and
- * fails closed (`parent-not-verified`/`containment-denied`). The final
- * exclusive create and the EEXIST recovery read both happen relative to
- * the same verified parent descriptor, so there is NO parent-swap window
- * between containment verification and the final operation.
+ * (`fcntl(F_GETPATH)` through the seam; must equal the expected canonical
+ * path) — an intermediate component replaced by a symlink diverges here
+ * and fails closed (`parent-not-verified`/`containment-denied`). The
+ * final exclusive create and the EEXIST recovery read both happen relative
+ * to the same verified parent descriptor, so there is NO parent-swap
+ * window between containment verification and the final operation.
  *
  * EEXIST / ADOPTION PATH (SIR-WP13B-002): the existing final component is
  * opened O_RDONLY|O_NOFOLLOW|O_NONBLOCK THROUGH THE VERIFIED PARENT
@@ -51,8 +53,9 @@
  *   committed WP-4 intake applies, so no schema-valid result accepted by
  *   the committed intake is rejected by an implementation-local ceiling.
  */
-import { constants, openSync, closeSync, readSync, writeSync, fstatSync, readlinkSync, unlinkSync } from 'node:fs';
+import { constants, openSync, closeSync, readSync, writeSync, fstatSync } from 'node:fs';
 import * as path from 'node:path';
+import { openDirectoryAtWriter, identityOf, createExclusiveFileWriter, openExistingFileWriter, cleanupCreated } from '../internal/darwin-fs/writer.js';
 import { INPUT_BYTE_LIMITS } from '../internal/phase.js';
 
 export const RESULT_RELATIVE_DIR = 'results';
@@ -63,9 +66,7 @@ export const RESULT_BYTE_LIMIT = INPUT_BYTE_LIMITS.artifact;
 const OCCURRENCE_ID_RE = /^pgw:o:[0-9a-f]{32}$/;
 const ATTEMPT_ID_RE = /^pgw:a:[0-9a-f]{32}$/;
 
-const { O_CREAT, O_EXCL, O_WRONLY, O_RDONLY, O_NOFOLLOW, O_DIRECTORY, O_NONBLOCK } = constants;
-const RESULT_FILE_MODE = 0o600;
-
+const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = constants;
 export type ResultWriteCode =
   | 'invalid-operand'
   | 'bytes-too-large'
@@ -101,11 +102,6 @@ export function resultRelativePath(occurrenceId: string, attemptId: string): str
   return `${RESULT_RELATIVE_DIR}/${occurrenceId}/${attemptId}/${RESULT_FILE_NAME}`;
 }
 
-/** Descriptor-anchored path: resolves relative to the already-open directory object. */
-function fdRelativePath(fd: number, relative: string): string {
-  return `/proc/self/fd/${fd}/${relative}`;
-}
-
 function errnoOf(err: unknown): string | undefined {
   return (err as NodeJS.ErrnoException).code ?? undefined;
 }
@@ -135,10 +131,13 @@ function mapOpenError(code: string | undefined): ResultWriteCode {
 
 /**
  * Open one directory component anchored to an already-verified parent
- * descriptor: O_DIRECTORY|O_NOFOLLOW, fstat-verified (directory, service
- * uid), resolution-path verified against the expected canonical path. The
- * returned descriptor is retained (never re-resolved lexically later); a
- * failure closes any opened descriptor and returns a typed code.
+ * descriptor: single-component `openDirectoryAt` through the Darwin seam
+ * (MAC-2C; replaces the Linux `/proc/self/fd/<fd>/<component>` open),
+ * fstat-verified (directory, service uid), resolution-path verified
+ * against the expected canonical path (F_GETPATH identity evidence — never
+ * reopened, never used as mutation authority). The returned descriptor is
+ * retained (never re-resolved lexically later); a failure closes any
+ * opened descriptor and returns a typed code.
  */
 function openVerifiedDirectory(
   parentFd: number,
@@ -148,7 +147,11 @@ function openVerifiedDirectory(
 ): { readonly ok: true; readonly fd: number } | { readonly ok: false; readonly code: ResultWriteCode } {
   let fd: number | undefined;
   try {
-    fd = openSync(fdRelativePath(parentFd, component), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    const opened = openDirectoryAtWriter(parentFd, component);
+    if (!opened.ok) {
+      return { ok: false, code: opened.code };
+    }
+    fd = opened.fd;
     const stat = fstatSync(fd);
     if (!stat.isDirectory()) {
       closeFd(fd);
@@ -160,8 +163,8 @@ function openVerifiedDirectory(
       fd = undefined;
       return { ok: false, code: 'ownership-mismatch' };
     }
-    const resolved = readlinkSync(`/proc/self/fd/${fd}`);
-    if (resolved !== expectedResolved) {
+    const identity = identityOf(fd, expectedResolved);
+    if (!identity.ok) {
       closeFd(fd);
       fd = undefined;
       return { ok: false, code: 'parent-not-verified' };
@@ -184,19 +187,17 @@ function openVerifiedDirectory(
 function readExistingForRecovery(parentFd: number, finalComponent: string, serviceUid: number, expected: Uint8Array): ResultWriteOutcome {
   let existingFd: number | undefined;
   try {
-    try {
-      // O_RDONLY|O_NOFOLLOW|O_NONBLOCK: the established repository pattern
-      // for type-inspection opens (reader lane). O_NONBLOCK guarantees a
-      // FIFO at the destination can never block the open; the fstat below
-      // then rejects it as non-regular. A symlinked final component
-      // (dangling or not) is never followed (ELOOP → conflict).
-      existingFd = openSync(fdRelativePath(parentFd, finalComponent), O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
-    } catch (err) {
-      const code = errnoOf(err);
-      // A symlinked final component (dangling or not) is never followed.
-      if (code === 'ELOOP' || code === 'EMLINK') return { ok: false, code: 'exclusive-create-conflict' };
-      return { ok: false, code: 'io-failure' };
+    // MAC-2C: recovery open through the Darwin seam (openExistingFileAt,
+    // fixed O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC). O_NONBLOCK
+    // guarantees a FIFO at the destination can never block the open; the
+    // fstat below then rejects it as non-regular. A symlinked final
+    // component (dangling or not) is never followed (symlink-refused →
+    // conflict). A native open success is NEVER acceptance by itself.
+    const opened = openExistingFileWriter(parentFd, finalComponent);
+    if (!opened.ok) {
+      return { ok: false, code: opened.code };
     }
+    existingFd = opened.fd;
     const stat = fstatSync(existingFd);
     if (!stat.isFile()) {
       // Directory/device/socket/FIFO/other kind: not an adoptable
@@ -266,8 +267,12 @@ export function writeResultArtifact(input: ResultWriteInput): ResultWriteOutcome
       const rootStat = fstatSync(rootFd);
       if (!rootStat.isDirectory()) return { ok: false, code: 'parent-not-verified' };
       if (rootStat.uid !== input.serviceUid) return { ok: false, code: 'ownership-mismatch' };
-      const resolvedRoot = readlinkSync(`/proc/self/fd/${rootFd}`);
-      if (resolvedRoot !== root) return { ok: false, code: 'parent-not-verified' };
+      // MAC-2C: root descriptor identity via the seam's F_GETPATH (replaces
+      // readlink(/proc/self/fd/<rootFd>)); the accepted canonical root must
+      // equal the vnode-canonical path (production canonicalization is
+      // symlink-resolved — src/trusted/roots.ts). Mismatch fails closed.
+      const rootIdentity = identityOf(rootFd, root);
+      if (!rootIdentity.ok) return { ok: false, code: 'parent-not-verified' };
     } catch (err) {
       const code = errnoOf(err);
       if (code === 'ENOENT' || code === 'ENOTDIR') return { ok: false, code: 'missing-parent' };
@@ -302,22 +307,21 @@ export function writeResultArtifact(input: ResultWriteInput): ResultWriteOutcome
     }
 
     // 3. Exclusive create of the single final component through the
-    //    verified parent descriptor (O_EXCL never follows a symlink;
-    //    O_NOFOLLOW is belt-and-braces). Any existing final component —
-    //    regular file, directory, symlink, dangling symlink, unsupported
-    //    kind — fails closed here; EEXIST routes to the anchored recovery
-    //    read, never to an overwrite.
-    try {
-      fd = openSync(fdRelativePath(parentFd, finalComponent), O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, RESULT_FILE_MODE);
-      created = true;
-    } catch (err) {
-      const code = errnoOf(err);
-      if (code === 'EEXIST') {
+    //    verified parent descriptor (the seam's O_EXCL never follows a
+    //    symlink; O_NOFOLLOW is belt-and-braces; mode fixed 0600 in the
+    //    seam). Any existing final component — regular file, directory,
+    //    symlink, dangling symlink, unsupported kind — is reported as
+    //    `exists`; the writer routes to the anchored recovery read, never
+    //    to an overwrite. (MAC-2C: createExclusiveFileAt through the seam.)
+    const createdResult = createExclusiveFileWriter(parentFd, finalComponent);
+    if (!createdResult.ok) {
+      if (createdResult.code === 'exists') {
         return readExistingForRecovery(parentFd, finalComponent, input.serviceUid, input.bytes);
       }
-      if (code === 'EISDIR') return { ok: false, code: 'exclusive-create-conflict' };
-      return { ok: false, code: mapOpenError(code) };
+      return { ok: false, code: createdResult.code };
     }
+    fd = createdResult.fd;
+    created = true;
 
     // 4. Exact byte write (bounded loop; short writes continue).
     try {
@@ -334,13 +338,10 @@ export function writeResultArtifact(input: ResultWriteInput): ResultWriteOutcome
       return { ok: true, outcome: 'created' };
     } catch {
       // Best-effort cleanup of the object we created, THROUGH THE SAME
-      // VERIFIED PARENT descriptor and the same single final component.
+      // VERIFIED PARENT descriptor and the same single final component
+      // (MAC-2C: descriptor-relative unlinkAt through the seam).
       if (created) {
-        try {
-          unlinkSync(fdRelativePath(parentFd, finalComponent));
-        } catch {
-          // cleanup failure is itself typed; the conflict stands
-        }
+        cleanupCreated(parentFd, finalComponent);
       }
       return { ok: false, code: 'io-failure' };
     } finally {

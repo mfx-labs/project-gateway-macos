@@ -207,6 +207,30 @@ test('writing static guard: the Darwin adapter exposes only the executor bridge 
   assert.equal(adapter.includes('r.path'), true, 'getPath result is compared, never reopened');
 });
 
+test('writing static guard: the completion-writer Darwin adapter is a pure seam wrapper — no node:fs, no generic authority (MAC-2C)', () => {
+  const writerAdapter = codeOf(join(DARWIN_FS_SRC, 'writer.ts'));
+  // Pure seam wrapper: the ONLY import is the sealed native seam loader
+  // (identity/cleanup helpers come from the sibling adapter module).
+  assert.equal(writerAdapter.includes("from '#gateway-native'"), true, 'writer adapter bridges the accepted native seam');
+  assert.equal(writerAdapter.includes("from './adapter.js'"), true, 'reuses the shared private adapter');
+  assert.equal(writerAdapter.includes('node:fs'), false, 'writer adapter must be I/O-free (writer.ts owns fstat/read/close)');
+  for (const forbidden of [
+    '/proc', '/dev/fd', 'openSync', 'closeSync', 'writeSync', 'readSync', 'unlinkSync', 'readlinkSync', 'realpath',
+    'renameSync', 'mkdirSync', 'rmSync', 'chmodSync', 'chownSync', 'readdirSync', 'opendirSync',
+    "from 'fs'", "from 'fs/promises'", 'fs/promises', "require('fs')", "require('fs/promises')",
+    'child_process', 'spawn(', 'exec(', 'node:net', 'node:http', 'fetch(', 'process.env',
+    'Math.random', 'Date.now', 'setTimeout', 'setInterval',
+    'open(', 'unlink(', 'mkdir(', 'chmod(',
+  ]) {
+    assert.equal(writerAdapter.includes(forbidden), false, `writer adapter must not reach ${forbidden}`);
+  }
+  // The writer's DISTINCT `exists` routing is preserved (recovery/adoption
+  // is a writer decision, never a silent native conflict).
+  assert.equal(writerAdapter.includes("case 'exists': return 'exists'"), true, 'exists is routed distinctly to the inherited recovery path');
+  assert.equal(writerAdapter.includes('openExistingFileAt'), true, 'recovery open is the fixed-flag seam primitive');
+  assert.equal(writerAdapter.includes('verifyParentIdentity'), true, 'identity evidence is shared with the executor adapter');
+});
+
 test('writing static guard: the write capability is not exposed through the package root or ./mcp', () => {
   const root = readFileSync(join(REPO, 'src', 'index.ts'), 'utf8');
   const mcp = readFileSync(join(REPO, 'src', 'adapters', 'mcp', 'index.ts'), 'utf8');

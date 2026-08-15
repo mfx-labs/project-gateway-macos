@@ -13,7 +13,7 @@
  */
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, statSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, statSync, readdirSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -154,7 +154,12 @@ function makeOutcome(disposition: ExecutionAttemptDisposition = 'completed'): Ex
 }
 
 function newRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'wp13b-'));
+  // realpath-canonical root (MAC-2C): the writer verifies the root's
+  // descriptor identity against the vnode-canonical F_GETPATH path, and
+  // production canonical roots are symlink-resolved (src/trusted/roots.ts).
+  // tmpdir() is /var/folders/… whose vnode-canonical form is
+  // /private/var/folders/… — lexical roots would fail parent-not-verified.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wp13b-')));
   roots.push(root);
   return root;
 }
@@ -723,6 +728,44 @@ test('WP-13B: parent swap after root anchoring fails closed (anchored containmen
     assert.ok(out.code === 'containment-denied' || out.code === 'parent-not-verified', out.code);
   }
 });
+
+// ─── MAC-2C §15: vnode-canonical root identity on real APFS ───────────────
+
+test('WP-13B: root descriptor identity is vnode-canonical — lexical /var spelling and symlink aliases fail closed, canonical succeeds (MAC-2C)', () => {
+  const bytes = new TextEncoder().encode('{"canonical":"vnode-canonical-identity"}');
+  const uid = process.getuid?.() ?? 0;
+  // On this host tmpdir() is /var/folders/… whose vnode-canonical form
+  // (F_GETPATH) is /private/var/folders/…. The writer's root identity
+  // check is exact equality against the vnode-canonical path; there is NO
+  // lexical normalization as a substitute for identity.
+  const canonical = newRoot();
+  freshDestination(canonical);
+  assert.ok(canonical.startsWith('/private/var/'), `expected a /private/var canonical root on this host, got ${canonical}`);
+  // Deliberately NON-canonical evidence: the same directory through the
+  // lexical /var alias. Must fail closed — never normalized.
+  const lexicalAlias = canonical.replace(/^\/private\/var\//, '/var/');
+  assert.notEqual(lexicalAlias, canonical);
+  const outLexical = writeResultArtifact({ root: lexicalAlias, serviceUid: uid, occurrenceId: OCCURRENCE_ID, attemptId: ATTEMPT_ID, bytes });
+  assert.deepEqual(outLexical, { ok: false, code: 'parent-not-verified' }, 'lexical /var spelling must not be normalized into identity');
+  // A symlink alias of the root is refused at the O_NOFOLLOW root open.
+  const aliasLink = join(tmpdir(), `wp13b-alias-${aliasCounter++}`);
+  symlinkSync(canonical, aliasLink);
+  roots.push(aliasLink);
+  const outLink = writeResultArtifact({ root: aliasLink, serviceUid: uid, occurrenceId: OCCURRENCE_ID, attemptId: ATTEMPT_ID, bytes });
+  // Fail-closed refusal at the O_NOFOLLOW root anchor. Inherited root-open
+  // errno mapping: Linux yields ELOOP -> containment-denied; on this kernel
+  // O_DIRECTORY|O_NOFOLLOW on a symlink yields ENOTDIR -> missing-parent.
+  // Both are inherited closed codes; the symlink is never followed.
+  assert.equal(outLink.ok, false);
+  if (!outLink.ok) {
+    assert.ok(['containment-denied', 'missing-parent'].includes(outLink.code), `code was ${outLink.code}`);
+  }
+  // The canonical spelling succeeds.
+  const out = writeResultArtifact({ root: canonical, serviceUid: uid, occurrenceId: OCCURRENCE_ID, attemptId: ATTEMPT_ID, bytes });
+  assert.deepEqual(out, { ok: true, outcome: 'created' });
+});
+
+let aliasCounter = 0;
 
 // ─── SIR-WP13B-004: committed byte ceiling ──────────────────────────────────
 
