@@ -1,5 +1,5 @@
 /**
- * @project-gateway/artifact-core/trusted (internal module family)
+ * @project-gateway/macos-core/trusted (internal module family)
  *
  * Trusted-local configuration foundation (WP-6 Phase 1).
  *

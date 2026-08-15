@@ -136,11 +136,11 @@ test('F8: internal package subpaths remain blocked', async () => {
   for (const subpath of ['internal/protocol-equality', 'adapters/pi/index', 'conformance/runner']) {
     let rejected = false;
     try {
-      await import(`@project-gateway/artifact-core/${subpath}`);
+      await import(`@project-gateway/macos-core/${subpath}`);
     } catch {
       rejected = true;
     }
-    assert.equal(rejected, true, `subpath @project-gateway/artifact-core/${subpath} must not resolve`);
+    assert.equal(rejected, true, `subpath @project-gateway/macos-core/${subpath} must not resolve`);
   }
 });
 

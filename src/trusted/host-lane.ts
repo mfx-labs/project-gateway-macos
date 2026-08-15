@@ -10,7 +10,12 @@
  * configuration, and the accepted lane participates in configuration
  * identity and correlation.
  *
- * The closed accepted-lane set is exactly:
+ * Two distinct sets are frozen here and MUST NOT be conflated (MAC-2E):
+ *
+ * PROTOCOL-RECOGNIZED LANE VALUES (three members; frozen; NEVER renamed):
+ * the lane identifiers the trusted-config protocol can represent,
+ * validate, and bind into configuration identity/digest and cross-lane
+ * replay semantics. This set is unchanged by the macOS product scope:
  *   - `linux-x86_64-posix-utf8-node22` — Linux; x86_64; POSIX filesystem
  *     semantics; UTF-8 locale; Node.js 22.x (first-class, validated);
  *   - `darwin-arm64-posix-utf8-node22` — macOS; arm64 (Apple Silicon);
@@ -19,6 +24,20 @@
  *   - `darwin-x86_64-posix-utf8-node22` — macOS; Intel/x86_64; POSIX
  *     filesystem semantics; UTF-8 locale; Node.js 22.x (PS-6I darwin
  *     Intel lane, ADR-043).
+ *
+ * PRODUCT-SUPPORTED CURRENT-HOST LANES (exactly two members; MAC-2E):
+ * this macOS product accepts ONLY the two Darwin lanes as current-host
+ * lanes — `darwin-x86_64-posix-utf8-node22` and
+ * `darwin-arm64-posix-utf8-node22`. `trustedHostLaneForPlatformArch` is
+ * the ONE product host-acceptance decision, derived from `platform` +
+ * `architecture` ONLY (no Node runtime-version probe): Linux, Windows,
+ * unknown platforms, and unsupported Darwin architectures never map to
+ * a supported lane (null) and the CLI boundary fails closed with exit 2
+ * before any server startup, store provisioning, or configuration
+ * activation. A Linux-bound store/configuration remains a syntactically
+ * known protocol object (replay-verifiable as protocol data) but is
+ * foreign to THIS product: no current host ever derives the Linux lane,
+ * so it can never be activated as the current-host configuration.
  *
  * Everything else — any `macos-*` spelling, Windows lanes, non-POSIX
  * semantics, unknown/future strings — remains unverified and
@@ -43,20 +62,24 @@ export function isSupportedHostLane(value: string): value is TrustedHostLane {
 }
 
 /**
- * Pure platform/architecture → trusted host lane mapping (PS-6, PS-6I).
+ * Pure platform/architecture → trusted host lane mapping (PS-6, PS-6I,
+ * MAC-2E product scope).
  *
  * This is the ONE shared mapping used at the operator/runtime CLI boundary
- * (bootstrap and start paths alike). It is pure: it never probes the host
- * itself — the caller supplies the observed `platform`/`arch` — so the
- * trusted core stays ambient-probe-free. Supported mappings only:
- *   linux + x64    → linux-x86_64-posix-utf8-node22
+ * (bootstrap and start paths alike), and it is the ONE product
+ * host-acceptance decision: it maps a CURRENT HOST to the lane this macOS
+ * product will run under. It is pure: it never probes the host itself —
+ * the caller supplies the observed `platform`/`arch` — so the trusted
+ * core stays ambient-probe-free. Supported product mappings only:
  *   darwin + arm64 → darwin-arm64-posix-utf8-node22
  *   darwin + x64   → darwin-x86_64-posix-utf8-node22
- * Everything else (Windows, unknown platforms/arches) returns null: the
- * CLI boundary fails closed with exit 2.
+ * Linux, Windows, unknown platforms/arches, and unsupported Darwin
+ * architectures return null (the Linux lane value remains a
+ * protocol-recognized operand for foreign-store/replay semantics, but no
+ * current host maps to it): the CLI boundary fails closed with exit 2
+ * before any server startup.
  */
 export function trustedHostLaneForPlatformArch(platform: string, arch: string): TrustedHostLane | null {
-  if (platform === 'linux' && arch === 'x64') return TRUSTED_HOST_LANE;
   if (platform === 'darwin' && arch === 'arm64') return DARWIN_ARM64_HOST_LANE;
   if (platform === 'darwin' && arch === 'x64') return DARWIN_X86_64_HOST_LANE;
   return null;

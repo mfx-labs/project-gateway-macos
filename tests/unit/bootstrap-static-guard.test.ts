@@ -2,7 +2,7 @@
  * PS-1 — operator bootstrap boundary static guard.
  *
  * Proves the dedicated `src/bootstrap` module boundary (the operator-only
- * `project-gateway-mcp bootstrap` verb):
+ * `project-gateway-macos-mcp bootstrap` verb):
  *   - no network, subprocess, tunnel, MCP SDK, or environment access;
  *   - no stdout writes other than the resolved-configuration document
  *     (bootstrap mode is NOT the MCP runtime; the runtime stdout invariant

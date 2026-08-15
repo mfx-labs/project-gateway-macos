@@ -1,7 +1,7 @@
 /**
  * PS-1 — operator bootstrap CLI tests (subprocess, built CLI).
  *
- * Proves `project-gateway-mcp bootstrap`:
+ * Proves `project-gateway-macos-mcp bootstrap`:
  *   - exact CLI surface (success, replay, malformed operands fail closed);
  *   - bootstrap mode never starts the stdio MCP server and emits no MCP
  *     protocol data;

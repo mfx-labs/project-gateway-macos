@@ -167,7 +167,7 @@ test('stdio: modern 2026-07-28 path — pinned negotiation, discover, nine tools
       // be absent — if present it must be the package identity.
       const serverVersion = client.getServerVersion();
       if (serverVersion !== undefined) {
-        assert.equal(serverVersion.name, '@project-gateway/artifact-core');
+        assert.equal(serverVersion.name, '@project-gateway/macos-core');
       }
       // Exactly nine tools: six WP-9 inspection + one WP-10 drafting
       // + two WP-14A controlled producer tools.
@@ -354,7 +354,7 @@ test('stdio: startup failures fail fast with bounded stderr and no partial serve
     let r = await run(['--config', badPath]);
     assert.notEqual(r.code, 0);
     assert.equal(r.stdout, '', 'no protocol output on startup failure');
-    assert.ok(r.stderr.includes('project-gateway-mcp:'), 'bounded stderr diagnostic expected');
+    assert.ok(r.stderr.includes('project-gateway-macos-mcp:'), 'bounded stderr diagnostic expected');
     // (b) unknown flag.
     r = await run(['--bogus']);
     assert.equal(r.code, 2);
@@ -365,7 +365,7 @@ test('stdio: startup failures fail fast with bounded stderr and no partial serve
     const wrongIdentityPath = writeConfig(env.dir, [surfaceConfig(env, 'alpha', { configurationIdentity: 'sha-256:' + 'b'.repeat(64) })]);
     r = await run(['--config', wrongIdentityPath]);
     assert.notEqual(r.code, 0);
-    assert.ok(r.stderr.includes('project-gateway-mcp:'), 'bounded stderr diagnostic expected');
+    assert.ok(r.stderr.includes('project-gateway-macos-mcp:'), 'bounded stderr diagnostic expected');
     assert.equal(r.stderr.includes(env.storeRoot), false, 'no store path in diagnostics');
   } finally {
     rmSync(env.dir, { recursive: true, force: true });
@@ -418,7 +418,7 @@ test('F1: startup config byte ceiling — at-ceiling config serves; oversized co
     const r = await runCli(['--config', overPath]);
     assert.notEqual(r.code, 0, 'oversized config must exit non-zero');
     assert.equal(r.stdout, '', 'no protocol/banner bytes on stdout');
-    assert.ok(r.stderr.includes('project-gateway-mcp:'), 'bounded stderr diagnostic expected');
+    assert.ok(r.stderr.includes('project-gateway-macos-mcp:'), 'bounded stderr diagnostic expected');
     assert.ok(r.stderr.includes('byte ceiling'), 'diagnostic names the ceiling');
     assert.ok(r.stderr.length < 4096, 'stderr bounded');
   } finally {
@@ -441,7 +441,7 @@ test('F1/F2: startup config failure atomicity — valid surface A never starts w
       const r = await runCli(['--config', configPath]);
       assert.notEqual(r.code, 0, 'defective surface must fail the whole startup');
       assert.equal(r.stdout, '', 'no partial server means no stdout protocol bytes');
-      assert.ok(r.stderr.includes('project-gateway-mcp:'), 'bounded stderr diagnostic expected');
+      assert.ok(r.stderr.includes('project-gateway-macos-mcp:'), 'bounded stderr diagnostic expected');
     }
   } finally {
     rmSync(envA.dir, { recursive: true, force: true });

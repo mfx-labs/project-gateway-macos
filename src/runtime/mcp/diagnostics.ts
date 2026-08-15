@@ -12,5 +12,5 @@ const MAX_DIAGNOSTIC_LENGTH = 2048;
 export function writeDiagnostic(message: string): void {
   const bounded = message.length > MAX_DIAGNOSTIC_LENGTH ? `${message.slice(0, MAX_DIAGNOSTIC_LENGTH)}…(truncated)` : message;
   const singleLine = bounded.replace(/[\r\n]+/g, ' ');
-  process.stderr.write(`project-gateway-mcp: ${singleLine}\n`);
+  process.stderr.write(`project-gateway-macos-mcp: ${singleLine}\n`);
 }

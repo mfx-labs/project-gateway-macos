@@ -1,5 +1,5 @@
 /**
- * @project-gateway/artifact-core/pi-adapter
+ * @project-gateway/macos-core/pi-adapter
  *
  * WP-5A Pi adapter prototype: converts an already validated and
  * point-of-use-eligible ExecutionBundle (plus its four exact resolved

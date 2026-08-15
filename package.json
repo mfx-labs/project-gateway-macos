@@ -1,5 +1,5 @@
 {
-  "name": "@project-gateway/artifact-core",
+  "name": "@project-gateway/macos-core",
   "version": "0.1.0",
   "description": "Consumer-neutral Artifact Core library: deterministic validation and protocol evaluation for the Project Gateway artifact protocol (WP-0..WP-3).",
   "private": true,
@@ -68,7 +68,7 @@
     "typescript": "7.0.2"
   },
   "bin": {
-    "project-gateway-mcp": "./dist/runtime/mcp/cli.js"
+    "project-gateway-macos-mcp": "./dist/runtime/mcp/cli.js"
   },
   "repository": {
     "type": "git",

@@ -26,7 +26,7 @@
  *   authority-bearing object.
  * - It is not exported through the package root, ./mcp, or any package
  *   subpath; the only reachable surface is the operator CLI verb
- *   `project-gateway-mcp bootstrap`.
+ *   `project-gateway-macos-mcp bootstrap`.
  *
  * The module is I/O-free (no filesystem, network, process, or timers): all
  * host observation (path canonicalization, artifact-location resolution) is

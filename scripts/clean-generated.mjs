@@ -10,7 +10,7 @@
  * script's own location (import.meta.url -> dirname -> parent), NEVER from
  * process.cwd(). Before deletion the script verifies:
  *   - the derived root contains package.json whose name is the expected
- *     repository marker (@project-gateway/artifact-core);
+ *     repository marker (@project-gateway/macos-core);
  *   - each target is exactly a direct child of the derived root;
  *   - the target basename is exactly `dist` or `dist-test`;
  *   - neither target resolves to the repository root itself;
@@ -27,7 +27,7 @@ import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const EXPECTED_PACKAGE_NAME = '@project-gateway/artifact-core';
+const EXPECTED_PACKAGE_NAME = '@project-gateway/macos-core';
 const TARGETS = ['dist', 'dist-test'];
 
 // Repository root derived from this script: <repo>/scripts/clean-generated.mjs

@@ -60,7 +60,7 @@ import type { RuntimeConfig } from './config.js';
 import { TRUSTED_HOST_LANE } from '../../trusted/index.js';
 import type { TrustedHostLane } from '../../trusted/index.js';
 
-const BOOTSTRAP_ACTION_IDENTITY = 'project-gateway-mcp-bootstrap';
+const BOOTSTRAP_ACTION_IDENTITY = 'project-gateway-macos-mcp-bootstrap';
 
 /** Default Git binary path for the WP-14A changed-context lane (operator-overridable). */
 const DEFAULT_GIT_PATH = '/usr/bin/git';

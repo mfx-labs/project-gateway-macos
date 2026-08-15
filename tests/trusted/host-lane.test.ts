@@ -11,6 +11,15 @@
  * PS-6I adds `darwin-x86_64-posix-utf8-node22` (macOS Intel) as the
  * third accepted member. Any `macos-*` spelling, Windows, and unknown
  * lanes fail closed (ADR-042, ADR-043).
+ *
+ * MAC-2E (Darwin-only product scope): the three-member set above remains
+ * the PROTOCOL-recognized lane vocabulary (validation, digest identity,
+ * cross-lane replay) unchanged; the macOS PRODUCT additionally accepts
+ * ONLY the two Darwin lanes as current-host lanes —
+ * `trustedHostLaneForPlatformArch` never maps a Linux/Windows/unknown
+ * host to a lane, so the CLI boundary fails closed with exit 2.
+ * Protocol can represent a lane value; the product decides which current
+ * hosts it runs on.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -141,19 +150,46 @@ test('PS6I: Intel-lane identity is deterministic (identical inputs, identical di
   assert.equal(computeTrustedConfigurationIdentity(a).digest, computeTrustedConfigurationIdentity(b).digest);
 });
 
-test('PS6I: the shared platform/arch → lane mapping is the one derivation for bootstrap AND runtime', () => {
+test('MAC-2E: the shared platform/arch → lane mapping accepts ONLY the two Darwin product lanes', () => {
   // The mapping is pure and shared; the CLI boundary supplies the observed
-  // platform/arch exactly once. Supported mappings only.
-  assert.equal(trustedHostLaneForPlatformArch('linux', 'x64'), TRUSTED_HOST_LANE);
+  // platform/arch exactly once. Product-supported current-host mappings only.
   assert.equal(trustedHostLaneForPlatformArch('darwin', 'arm64'), DARWIN_ARM64_HOST_LANE);
   assert.equal(trustedHostLaneForPlatformArch('darwin', 'x64'), DARWIN_X86_64_HOST_LANE);
-  // Everything else fails closed as unsupported: Windows, unknown
-  // platforms/arches.
+  // Linux — even x86_64 — is no longer a current-host lane for this macOS
+  // product: the lane value remains protocol-recognized (config
+  // validation/digest/replay), but no current host maps to it, so
+  // Linux-bound state is foreign and fails closed at the CLI (exit 2).
+  assert.equal(trustedHostLaneForPlatformArch('linux', 'x64'), null);
   assert.equal(trustedHostLaneForPlatformArch('linux', 'arm64'), null);
+  assert.equal(trustedHostLaneForPlatformArch('linux', 'ia32'), null);
+  // Windows fails closed on every architecture.
   assert.equal(trustedHostLaneForPlatformArch('win32', 'x64'), null);
-  assert.equal(trustedHostLaneForPlatformArch('darwin', ''), null);
+  assert.equal(trustedHostLaneForPlatformArch('win32', 'arm64'), null);
+  // Unknown platforms and unsupported Darwin architectures fail closed.
   assert.equal(trustedHostLaneForPlatformArch('freebsd', 'x64'), null);
+  assert.equal(trustedHostLaneForPlatformArch('openbsd', 'arm64'), null);
+  assert.equal(trustedHostLaneForPlatformArch('plan9', 'x64'), null);
+  assert.equal(trustedHostLaneForPlatformArch('darwin', ''), null);
+  assert.equal(trustedHostLaneForPlatformArch('darwin', 'ia32'), null);
+  assert.equal(trustedHostLaneForPlatformArch('darwin', 'arm'), null);
   assert.equal(trustedHostLaneForPlatformArch('', ''), null);
+  assert.equal(trustedHostLaneForPlatformArch('DARWIN', 'X64'), null);
+});
+
+test('MAC-2E: the real current host classifies as a supported Darwin product lane', () => {
+  // The current real Intel host must classify as
+  // darwin-x86_64-posix-utf8-node22; an Apple Silicon host would classify
+  // as darwin-arm64-posix-utf8-node22 (MAC-5 owns physical Apple Silicon
+  // acceptance; MAC-2E requires no real arm64 hardware).
+  const lane = trustedHostLaneForPlatformArch(process.platform, process.arch);
+  if (process.platform === 'darwin' && process.arch === 'x64') {
+    assert.equal(lane, DARWIN_X86_64_HOST_LANE);
+  } else if (process.platform === 'darwin' && process.arch === 'arm64') {
+    assert.equal(lane, DARWIN_ARM64_HOST_LANE);
+  } else {
+    // Non-Darwin hosts cannot run this product; the classification must be null.
+    assert.equal(lane, null);
+  }
 });
 
 test('F7: unsupported lanes fail before any input handling', () => {

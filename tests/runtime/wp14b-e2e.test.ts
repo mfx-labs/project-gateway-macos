@@ -1,7 +1,7 @@
 /**
  * WP-14B — end-to-end integration validation through the real stdio
  * runtime (the exact path an external Secure MCP Tunnel / ChatGPT connector
- * launches: `project-gateway-mcp --config <file>`).
+ * launches: `project-gateway-macos-mcp --config <file>`).
  *
  * Proves the ChatGPT-side zero-transfer workflow end-to-end:
  *

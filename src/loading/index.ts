@@ -1,5 +1,5 @@
 /**
- * @project-gateway/artifact-core/loading
+ * @project-gateway/macos-core/loading
  *
  * WP-14C — Pi zero-transfer artifact loading (proposal-context loads).
  *

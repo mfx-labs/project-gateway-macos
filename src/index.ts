@@ -1,5 +1,5 @@
 /**
- * @project-gateway/artifact-core
+ * @project-gateway/macos-core
  *
  * Consumer-neutral Artifact Core library: deterministic validation and protocol
  * evaluation for the Project Gateway artifact protocol (WP-0..WP-3).

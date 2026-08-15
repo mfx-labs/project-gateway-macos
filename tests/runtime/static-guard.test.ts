@@ -161,7 +161,7 @@ test('runtime static guard: exactly nine tools are registered — six WP-9 inspe
 
 test('runtime static guard: the package bin entry maps to the runtime CLI', () => {
   const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')) as { bin?: Record<string, string> };
-  assert.equal(pkg.bin?.['project-gateway-mcp'], './dist/runtime/mcp/cli.js');
+  assert.equal(pkg.bin?.['project-gateway-macos-mcp'], './dist/runtime/mcp/cli.js');
   assert.equal(Object.keys(pkg.bin ?? {}).length, 1, 'exactly one bin entry');
   // The CLI is the modern stdio entry: serveStdio, never connect(StdioServerTransport).
   const cliSrc = readFileSync(join(RUNTIME_SRC, 'cli.ts'), 'utf8');

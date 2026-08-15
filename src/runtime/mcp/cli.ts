@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * WP-9 Slice 5 / WP-10 Slice 3 — local stdio MCP runtime CLI
- * (project-gateway-mcp).
+ * (project-gateway-macos-mcp).
  *
  * Trusted composition root: loads the operator-owned startup configuration
  * (--config), reconstructs genuine trusted registrations through the
@@ -17,7 +17,7 @@
  * STDOUT IS MCP PROTOCOL ONLY — no banners, no stdout logging. All operational
  * diagnostics go to bounded stderr.
  *
- * PS-1 operator bootstrap verb (`project-gateway-mcp bootstrap`): operator
+ * PS-1 operator bootstrap verb (`project-gateway-macos-mcp bootstrap`): operator
  * CLI behavior only, dispatched before the MCP path and never entering the
  * server; loads the operator bootstrap configuration, provisions or
  * replay-verifies the trusted store through the trusted control-plane
@@ -38,7 +38,7 @@ import { runBootstrapCommand } from '../../bootstrap/run.js';
 import { trustedHostLaneForPlatformArch } from '../../trusted/index.js';
 import type { TrustedHostLane } from '../../trusted/index.js';
 
-const USAGE = 'usage: project-gateway-mcp --config <file>\n       project-gateway-mcp bootstrap --config <file> [--output <file>]\n';
+const USAGE = 'usage: project-gateway-macos-mcp --config <file>\n       project-gateway-macos-mcp bootstrap --config <file> [--output <file>]\n';
 
 interface CliArgs {
   readonly configPath: string;
@@ -66,9 +66,9 @@ function parseArgs(argv: readonly string[]): { readonly ok: true; readonly args:
 function packageIdentity(): { readonly name: string; readonly version: string } {
   try {
     const pkg = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { readonly name?: string; readonly version?: string };
-    return { name: pkg.name ?? 'project-gateway-mcp', version: pkg.version ?? '0.0.0' };
+    return { name: pkg.name ?? 'project-gateway-macos-mcp', version: pkg.version ?? '0.0.0' };
   } catch {
-    return { name: 'project-gateway-mcp', version: '0.0.0' };
+    return { name: 'project-gateway-macos-mcp', version: '0.0.0' };
   }
 }
 
@@ -83,11 +83,11 @@ async function main(): Promise<void> {
   // shared by the bootstrap path and the runtime/start path (PS-6). The
   // I/O-free trusted core never probes the host itself; the pure mapping
   // consumes this boundary's single host observation. Unsupported hosts
-  // (macOS Intel, Windows, unknown) fail closed with exit 2 before any
-  // validation or composition.
+  // (Linux, Windows, unknown platforms/architectures) fail closed with
+  // exit 2 before any validation, composition, or server startup.
   const hostLane = trustedHostLaneForPlatformArch(process.platform, process.arch);
   if (hostLane === null) {
-    process.stderr.write(`project-gateway-mcp: unsupported host lane (${process.platform} ${process.arch}); supported: linux-x86_64, darwin-arm64, darwin-x86_64\n`);
+    process.stderr.write(`project-gateway-macos-mcp: unsupported host lane (${process.platform} ${process.arch}); supported: darwin-arm64, darwin-x86_64\n`);
     process.exit(2);
   }
   // Operator-only bootstrap verb: never enters the MCP server path.

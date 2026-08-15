@@ -1,5 +1,5 @@
 /**
- * @project-gateway/artifact-core/mcp
+ * @project-gateway/macos-core/mcp
  *
  * MCP adapter library boundary: WP-9 MCP inspection surface (slice 1-5:
  * transport-free protocol/tool layer, read-only inspection tools backed

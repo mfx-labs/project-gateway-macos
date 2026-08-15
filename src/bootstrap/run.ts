@@ -1,11 +1,11 @@
 /**
- * PS-1 — operator bootstrap command runner (`project-gateway-mcp bootstrap`).
+ * PS-1 — operator bootstrap command runner (`project-gateway-macos-mcp bootstrap`).
  *
  * Operator CLI behavior ONLY: loads the operator bootstrap configuration
  * (closed document; `configurationIdentity` may be absent and is then
  * derived), composes the genuine control-plane bootstrap action per surface
  * (provision or exact idempotent replay), and emits the resolved runtime
- * configuration — the exact document normal `project-gateway-mcp --config`
+ * configuration — the exact document normal `project-gateway-macos-mcp --config`
  * startup accepts.
  *
  * This module NEVER starts the MCP server, never touches the MCP SDK, and
@@ -34,7 +34,7 @@ import { bootstrapStore, type StorageBootstrapActionInput } from '../control-pla
 import type { TrustedHostLane } from '../trusted/index.js';
 
 const BOOTSTRAP_USAGE =
-  'usage: project-gateway-mcp bootstrap --config <file> [--output <file>]\n';
+  'usage: project-gateway-macos-mcp bootstrap --config <file> [--output <file>]\n';
 
 /**
  * Low-level output write primitive (node:fs `writeSync` signature).
