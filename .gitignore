@@ -12,3 +12,10 @@ dist-test/
 !tests/pi-adapter/fixtures/pi-packages/**/
 !tests/pi-adapter/fixtures/pi-packages/**/dist/
 !tests/pi-adapter/fixtures/pi-packages/**/dist/index.js
+
+# MAC-1 native seam: build artifacts only; prebuilt binaries are staged
+# by scripts/build-native.mjs and are not source (MAC-1 keeps the review
+# diff source-only; distribution packaging is MAC-7).
+native/build/
+native/darwin-x64/*.node
+native/darwin-arm64/*.node

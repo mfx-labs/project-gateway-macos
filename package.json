@@ -50,7 +50,10 @@
     "test:wp7-security": "node --test \"dist-test/tests/wp7/security/*.test.js\"",
     "test:storage-crash": "node --test \"dist-test/tests/process/storage-crash/*.test.js\"",
     "clean:generated": "node scripts/clean-generated.mjs",
-    "test:runtime": "node --test \"dist-test/tests/runtime/*.test.js\""
+    "test:runtime": "node --test \"dist-test/tests/runtime/*.test.js\"",
+    "build:native": "node scripts/build-native.mjs x64",
+    "build:native:arm64": "node scripts/build-native.mjs arm64",
+    "test:native": "node --test \"native/test/*.test.mjs\""
   },
   "license": "MIT",
   "dependencies": {
@@ -61,6 +64,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@types/node": "26.1.2",
+    "node-gyp": "^13.0.1",
     "typescript": "7.0.2"
   },
   "bin": {

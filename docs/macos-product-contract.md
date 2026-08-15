@@ -172,12 +172,7 @@ Recorded facts:
   and no descriptor resolution (`F_GETPATH`), so the inherited
   descriptor-anchored model cannot be re-expressed in pure Node on
   macOS.
-- **`/dev/fd` is not a replacement for Linux `/proc/self/fd`**: on
-  Darwin, `/dev/fd/N` is a symlink to the original path; opening
-  `/dev/fd/N/<relative>` re-resolves the lexical path and re-follows
-  intermediate components — exactly the TOCTOU the descriptor-anchored
-  model eliminates. `/dev/fd` must never be used for security-critical
-  resolution on macOS.
+- **`/dev/fd` is not a replacement for Linux `/proc/self/fd`** (documentation erratum, MAC-1; decision unchanged — see the MAC-1 report §4): on the tested macOS host, `/dev/fd/<fd>/<child>` did not provide directory-fd-relative traversal (open of a child through the `/dev/fd` entry failed), and `readlink('/dev/fd/<fd>')` did not provide the required descriptor-path identity. `/dev/fd` therefore cannot replace Linux `/proc/self/fd` for this security boundary and must never be used for security-critical resolution on macOS.
 - The native helper must remain **narrow and private** to the
   security-critical filesystem boundary: a minimal addon with a minimal
   closed export surface, no general filesystem authority, no path
