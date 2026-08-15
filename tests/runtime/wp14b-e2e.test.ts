@@ -18,7 +18,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, chmodSync, rmSync, writeFileSync, readFileSync, readdirSync, lstatSync, mkdirSync, renameSync, unlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, chmodSync, rmSync, writeFileSync, readFileSync, readdirSync, lstatSync, mkdirSync, renameSync, unlinkSync, existsSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -37,7 +37,9 @@ import { computeArtifactDigest } from '../../src/api/validate.js';
 const UID = process.getuid?.() ?? 0;
 const CID = 'sha-256:' + 'a'.repeat(64);
 const WS = 'pgw:w:aaaaaaaaaaaaaaaa';
-const GIT_BIN = '/home/chef/.local/git-2.45.4/bin/git';
+// Host-resolvable Git binary (MAC-2F portability port: the previous
+// Linux-only absolute path cannot exist on Darwin).
+const GIT_BIN = ['/usr/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'].find((p) => existsSync(p)) ?? 'git';
 const CLI_PATH = join(import.meta.dirname, '..', '..', '..', 'dist', 'runtime', 'mcp', 'cli.js');
 const REPO = join(import.meta.dirname, '..', '..', '..');
 
@@ -68,7 +70,11 @@ function git(args: string[], root: string): void {
 
 /** Full WP-14B fixture: v2 store + git workspace + artifact location + operator config. */
 function makeE2EFixture(): E2EFixture {
-  const base = mkdtempSync(join(tmpdir(), 'wp14b-e2e-'));
+  // Realpath-canonical base (MAC-2F Darwin portability): on macOS the
+  // tmpdir prefix `/var/folders/...` contains the `/var` symlink, which the
+  // WP-7 lane HOME/TMPDIR contract rejects; the canonical form
+  // `/private/var/folders/...` is production-equivalent.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'wp14b-e2e-')));
   chmodSync(base, 0o700);
   const storeDir = join(base, 'store');
   mkdirSync(storeDir, { mode: 0o700 });
