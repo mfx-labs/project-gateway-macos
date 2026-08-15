@@ -320,7 +320,7 @@ export class WorkspaceInspectionService {
       // The accepted resolved target no longer resolves: fail closed.
       return fail(errConDenied(corr));
     }
-    const opened = statIdentity(fstatSync(target.handle.fd));
+    const opened = statIdentity(fstatSync(target.fd));
     if (!verifyDescriptorIdentity(opened, accepted)) {
       // The opened descriptor is not the object the containment decision
       // accepted (final-file replacement, ancestor replacement, or symlink
@@ -348,11 +348,19 @@ export class WorkspaceInspectionService {
     if (!containment.ok) return containment.failure;
 
     const relative = containment.decision.canonicalWorkspaceRelativePath;
+    // MAC-2D: the descent base is the containment-RESOLVED canonical
+    // relative (realpath-canonical, symlink-free — SYM-006 resolves
+    // in-workspace symlinks in containment), derived from the decision's
+    // resolvedAbsolutePath; the lexical relative stays the correlation
+    // path.
+    const resolvedRelative = containment.decision.resolvedAbsolutePath === rootResult.root.rootPath
+      ? ''
+      : containment.decision.resolvedAbsolutePath.slice(rootResult.root.rootPath.length + 1);
     const corrWithPath = { ...corr1, canonicalWorkspaceRelativePath: relative, containmentDecisionIdentity: containment.decision.decisionIdentity };
 
     if (signal.aborted) return fail(errOpCancelled(corrWithPath));
 
-    const openResult = await openForListDirectory(rootResult.root, relative);
+    const openResult = await openForListDirectory(rootResult.root, relative, resolvedRelative);
     if (!openResult.ok) {
       return fail(this.mapFsCode(openResult.code, corrWithPath));
     }
@@ -360,7 +368,7 @@ export class WorkspaceInspectionService {
     // S-07: prove the opened directory handle is the containment-accepted object.
     const binding = this.bindDescriptor(openResult.target, containment.decision.resolvedAbsolutePath, corrWithPath);
     if (binding) {
-      await openResult.target.handle.close().catch(() => {});
+      openResult.target.close();
       return binding;
     }
 
@@ -372,7 +380,7 @@ export class WorkspaceInspectionService {
         corrWithPath,
       );
     } finally {
-      await openResult.target.handle.close().catch(() => {});
+      openResult.target.close();
     }
   }
 
@@ -424,11 +432,19 @@ export class WorkspaceInspectionService {
     if (!containment.ok) return containment.failure;
 
     const relative = containment.decision.canonicalWorkspaceRelativePath;
+    // MAC-2D: the descent base is the containment-RESOLVED canonical
+    // relative (realpath-canonical, symlink-free — SYM-006 resolves
+    // in-workspace symlinks in containment), derived from the decision's
+    // resolvedAbsolutePath; the lexical relative stays the correlation
+    // path.
+    const resolvedRelative = containment.decision.resolvedAbsolutePath === rootResult.root.rootPath
+      ? ''
+      : containment.decision.resolvedAbsolutePath.slice(rootResult.root.rootPath.length + 1);
     const corrWithPath = { ...corr1, canonicalWorkspaceRelativePath: relative, containmentDecisionIdentity: containment.decision.decisionIdentity };
 
     if (signal.aborted) return fail(errOpCancelled(corrWithPath));
 
-    const openResult = await openForRead(rootResult.root, relative);
+    const openResult = await openForRead(rootResult.root, relative, resolvedRelative);
     if (!openResult.ok) {
       return fail(this.mapFsCode(openResult.code, corrWithPath));
     }
@@ -436,7 +452,7 @@ export class WorkspaceInspectionService {
     // S-07: prove the opened descriptor is the containment-accepted object.
     const binding = this.bindDescriptor(openResult.target, containment.decision.resolvedAbsolutePath, corrWithPath);
     if (binding) {
-      await openResult.target.handle.close().catch(() => {});
+      openResult.target.close();
       return binding;
     }
 
@@ -476,7 +492,7 @@ export class WorkspaceInspectionService {
         corrWithPath,
       );
     } finally {
-      await openResult.target.handle.close().catch(() => {});
+      openResult.target.close();
     }
   }
 
@@ -497,11 +513,19 @@ export class WorkspaceInspectionService {
     if (!containment.ok) return containment.failure;
 
     const relative = containment.decision.canonicalWorkspaceRelativePath;
+    // MAC-2D: the descent base is the containment-RESOLVED canonical
+    // relative (realpath-canonical, symlink-free — SYM-006 resolves
+    // in-workspace symlinks in containment), derived from the decision's
+    // resolvedAbsolutePath; the lexical relative stays the correlation
+    // path.
+    const resolvedRelative = containment.decision.resolvedAbsolutePath === rootResult.root.rootPath
+      ? ''
+      : containment.decision.resolvedAbsolutePath.slice(rootResult.root.rootPath.length + 1);
     const corrWithPath = { ...corr1, canonicalWorkspaceRelativePath: relative, containmentDecisionIdentity: containment.decision.decisionIdentity };
 
     if (signal.aborted) return fail(errOpCancelled(corrWithPath));
 
-    const openResult = await openForRead(rootResult.root, relative);
+    const openResult = await openForRead(rootResult.root, relative, resolvedRelative);
     if (!openResult.ok) {
       return fail(this.mapFsCode(openResult.code, corrWithPath));
     }
@@ -509,7 +533,7 @@ export class WorkspaceInspectionService {
     // S-07: prove the opened descriptor is the containment-accepted object.
     const binding = this.bindDescriptor(openResult.target, containment.decision.resolvedAbsolutePath, corrWithPath);
     if (binding) {
-      await openResult.target.handle.close().catch(() => {});
+      openResult.target.close();
       return binding;
     }
 
@@ -523,7 +547,7 @@ export class WorkspaceInspectionService {
         corrWithPath,
       );
     } finally {
-      await openResult.target.handle.close().catch(() => {});
+      openResult.target.close();
     }
   }
 

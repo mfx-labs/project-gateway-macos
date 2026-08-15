@@ -181,7 +181,11 @@ function realResolver(): ExistingPathResolver {
  * constraint for HOME/TMPDIR validation.
  */
 export function createWp7Fixture(): Wp7Fixture {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wp7-test-'));
+  // realpath-canonical base (MAC-2D): production canonical roots are
+  // symlink-resolved (src/trusted/roots.ts) and the reader's S-07 /
+  // containment evidence is realpath-canonical; tmpdir() is /var/… whose
+  // vnode-canonical form is /private/var/….
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wp7-test-')));
   const root = makeTree(base, 'workspace');
   // Conventional tree
   makeTree(root, 'docs');
@@ -236,16 +240,16 @@ export function createGitFixture(
   configContent?: string,
   extraSetup?: (root: string) => void,
 ): { root: string; cleanup(): void } {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'wp7-git-test-'));
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'wp7-git-test-')));
   const root = makeTree(base, 'repo');
   // init a git repo with the host git binary
-  execFileSync('/home/chef/.local/git-2.45.4/bin/git', ['init', '-q', root], { stdio: 'ignore' });
+  execFileSync(process.env.WP7_GIT_BINARY ?? '/usr/bin/git', ['init', '-q', root], { stdio: 'ignore' });
   // Set user identity to allow commits
-  execFileSync('/home/chef/.local/git-2.45.4/bin/git', ['-C', root, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
-  execFileSync('/home/chef/.local/git-2.45.4/bin/git', ['-C', root, 'config', 'user.name', 't'], { stdio: 'ignore' });
+  execFileSync(process.env.WP7_GIT_BINARY ?? '/usr/bin/git', ['-C', root, 'config', 'user.email', 't@t'], { stdio: 'ignore' });
+  execFileSync(process.env.WP7_GIT_BINARY ?? '/usr/bin/git', ['-C', root, 'config', 'user.name', 't'], { stdio: 'ignore' });
   writeFile(root, 'file.txt', 'content\n');
-  execFileSync('/home/chef/.local/git-2.45.4/bin/git', ['-C', root, 'add', 'file.txt'], { stdio: 'ignore' });
-  execFileSync('/home/chef/.local/git-2.45.4/bin/git', ['-C', root, 'commit', '-q', '-m', 'init'], { stdio: 'ignore' });
+  execFileSync(process.env.WP7_GIT_BINARY ?? '/usr/bin/git', ['-C', root, 'add', 'file.txt'], { stdio: 'ignore' });
+  execFileSync(process.env.WP7_GIT_BINARY ?? '/usr/bin/git', ['-C', root, 'commit', '-q', '-m', 'init'], { stdio: 'ignore' });
 
   if (configContent !== undefined) {
     fs.writeFileSync(path.join(root, '.git', 'config'), configContent);

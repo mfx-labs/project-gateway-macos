@@ -25,7 +25,7 @@ import { initializeGitHostLane, type GitHostLaneDescriptor } from '../../../src/
 import { executeGit } from '../../../src/git/wrapper.js';
 import { validateTrustedWorkspaceConfiguration, TRUSTED_HOST_LANE } from '../../../src/trusted/index.js';
 
-const GIT_BIN = '/home/chef/.local/git-2.45.4/bin/git';
+const GIT_BIN = process.env.WP7_GIT_BINARY ?? '/usr/bin/git';
 // Z-03: repository root derived from this file's location, never from the
 // invocation working directory (dist-test/tests/wp7/security -> repo root).
 const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
@@ -91,6 +91,29 @@ describe('WP-7 security: static audits', () => {
       const src = fs.readFileSync(p, 'utf8');
       assert.ok(!src.includes("await import('node:child_process')"), `dynamic import forbidden in ${p}`);
     }
+  });
+
+  it('reader fs layer uses raw-fd ownership only (MAC-2D): no /proc, no opendirSync, no FileHandle target methods, no descriptor-path reopening', () => {
+    const codeOf = (p: string): string => fs.readFileSync(p, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+    const fsSrc = codeOf(path.join(srcDir, 'reader', 'fs.ts'));
+    const serviceSrc = codeOf(path.join(srcDir, 'reader', 'service.ts'));
+    for (const needle of ['/proc/self/fd', '/dev/fd', 'opendirSync', 'target.handle', 'handle.read', 'readlinkSync']) {
+      assert.ok(!fsSrc.includes(needle), `fs.ts must not reach ${needle}`);
+      assert.ok(!serviceSrc.includes(needle), `service.ts must not reach ${needle}`);
+    }
+    // The workspace-root FileHandle (bindWorkspaceRoot) legitimately keeps
+    // its own handle.close() — only TARGET handle usage is forbidden.
+    // The MAC-2D ownership model: targets close their owned raw fd via
+    // close() exactly once (borrowed-root targets are no-ops); byte reads
+    // are raw-fd readSync; enumeration goes through the native seam.
+    assert.ok(fsSrc.includes('closeSync'), 'raw-fd closure');
+    assert.ok(fsSrc.includes('readSync'), 'raw-fd byte reads');
+    assert.ok(fsSrc.includes('readDirectoryEntries'), 'enumeration through the native seam');
+    assert.ok(fsSrc.includes('ownsFd'), 'ownership is explicit in the target type');
+    assert.ok(serviceSrc.includes('.close()'), 'targets close via the single ownership method');
+    assert.ok(!serviceSrc.includes('.handle'), 'no FileHandle target surface remains in the service');
   });
 
   it('no Git mutation subcommands in the allowlist', () => {
@@ -657,12 +680,18 @@ describe('WP-7 security: failure-path tripwires', () => {
 // ---------------------------------------------------------------------------
 
 describe('WP-7 security: ownership-aware child-process evidence', () => {
+  // These tests observe the host process table via /proc — a Linux-only
+  // mechanism. On Darwin (MAC-2D lane) they are skipped with the reason
+  // recorded; the child-process reaping contract itself is exercised by
+  // the git lane tests on every platform.
+  const linuxOnly = process.platform !== 'linux';
   let fixture: Wp7Fixture;
   let git: { root: string; cleanup(): void };
   let readerService: WorkspaceInspectionService;
   let gitService: GitInspectionService;
 
   before(async () => {
+    if (linuxOnly) return;
     fixture = createWp7Fixture();
     git = createGitFixture();
     const report = validateTrustedWorkspaceConfiguration(
@@ -689,13 +718,15 @@ describe('WP-7 security: ownership-aware child-process evidence', () => {
   });
 
   after(async () => {
+    if (linuxOnly) return;
     await readerService.dispose().catch(() => {});
     gitService.dispose();
     git.cleanup();
     fixture.cleanup();
   });
 
-  it('WP-7 git children spawned during operations are observed, then reaped', async () => {
+  it('WP-7 git children spawned during operations are observed, then reaped', async (t: { skip: (m: string) => void }) => {
+    if (linuxOnly) { t.skip('/proc process-table observation is Linux-only (MAC-2D lane)'); return; }
     const me = process.pid;
     const observed = new Set<string>();
     const poll = setInterval(() => {
@@ -718,7 +749,8 @@ describe('WP-7 security: ownership-aware child-process evidence', () => {
     assert.deepEqual(gitDescendants(me), [], 'no WP-7-owned git child may remain after operations');
   });
 
-  it('leak-detection control: a deliberately leaked git child is detected, then cleaned up', async () => {
+  it('leak-detection control: a deliberately leaked git child is detected, then cleaned up', async (t: { skip: (m: string) => void }) => {
+    if (linuxOnly) { t.skip('/proc process-table observation is Linux-only (MAC-2D lane)'); return; }
     const me = process.pid;
     // Z-03: cwd pinned to the controlled git fixture repo — the evidence
     // never depends on the invocation working directory.
@@ -739,7 +771,8 @@ describe('WP-7 security: ownership-aware child-process evidence', () => {
     assert.deepEqual(gitDescendants(me), [], 'after cleanup, no WP-7-owned git child may remain');
   });
 
-  it('unrelated host git processes are ignored (ownership-aware)', async () => {
+  it('unrelated host git processes are ignored (ownership-aware)', async (t: { skip: (m: string) => void }) => {
+    if (linuxOnly) { t.skip('/proc process-table observation is Linux-only (MAC-2D lane)'); return; }
     const me = process.pid;
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'wp7-unrelated-'));
     const fifoPath = path.join(scratch, 'stdin-fifo');
