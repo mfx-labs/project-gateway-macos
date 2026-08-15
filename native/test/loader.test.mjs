@@ -111,7 +111,7 @@ function stripComments(src) {
     .replace(/\/\/[^\n]*/g, '');
 }
 
-test('real x64 addon loads and exposes exactly the five primitives', () => {
+test('real x64 addon loads and exposes exactly the six primitives', () => {
   const addon = loadGatewayFs();
-  assert.deepEqual(Object.keys(addon).sort(), ['createExclusiveFileAt', 'getPath', 'openDirectoryAt', 'openExistingFileAt', 'unlinkAt']);
+  assert.deepEqual(Object.keys(addon).sort(), ['createExclusiveFileAt', 'getPath', 'openDirectoryAt', 'openExistingFileAt', 'readDirectoryEntries', 'unlinkAt']);
 });

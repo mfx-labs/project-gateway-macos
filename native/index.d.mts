@@ -31,13 +31,26 @@ export type NativePathResult =
   | { readonly ok: true; readonly path: string }
   | { readonly ok: false; readonly code: NativeFsErrorCode };
 
-/** The closed five-function native seam (MAC-1). */
+/** Reader kind hint vocabulary (closed four-kind set; MAC-2D-NATIVE). */
+export type NativeDirKindHint = 'file' | 'directory' | 'symlink' | 'other';
+
+export interface NativeDirEntry {
+  readonly name: string;
+  readonly kindHint: NativeDirKindHint;
+}
+
+export type NativeDirectoryEntriesResult =
+  | { readonly ok: true; readonly entries: readonly NativeDirEntry[]; readonly truncated: boolean }
+  | { readonly ok: false; readonly code: NativeFsErrorCode };
+
+/** The closed six-function native seam (MAC-1 + MAC-2D-NATIVE). */
 export interface GatewayFsAddon {
   readonly openDirectoryAt: (parentFd: number, component: string) => NativeOpenResult;
   readonly createExclusiveFileAt: (parentFd: number, component: string) => NativeOpenResult;
   readonly openExistingFileAt: (parentFd: number, component: string) => NativeOpenResult;
   readonly unlinkAt: (parentFd: number, component: string) => NativeUnlinkResult;
   readonly getPath: (fd: number) => NativePathResult;
+  readonly readDirectoryEntries: (fd: number) => NativeDirectoryEntriesResult;
 }
 
 export type NativeAddonErrorCode = 'unsupported-platform' | 'missing-addon' | 'invalid-addon';

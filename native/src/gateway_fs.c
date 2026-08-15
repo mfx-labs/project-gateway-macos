@@ -45,10 +45,12 @@
 
 #include <node_api.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -327,8 +329,175 @@ static napi_value get_path(napi_env env, napi_callback_info info) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Module registration                                                 */
+/* Descriptor-bound directory enumeration (MAC-2D-NATIVE)              */
 /* ------------------------------------------------------------------ */
+
+/*
+ * Authoritative native hard cap: derived from the committed WP-7 reader
+ * ceiling `WP7_LIMITS.MAX_DIRECTORY_ENTRIES = 10_000`
+ * (src/reader/types.ts). The reader's JS `maxEntries` is bounded by that
+ * same ceiling, so a native cap of 10_000 can never change the JS-side
+ * truncation behavior. NOT an invented value (MAC-2D-NATIVE §3).
+ */
+#define READ_DIR_ENTRY_CAP 10000u
+
+/* Bounded name storage: NAME_MAX (255) + NUL (Darwin). */
+#define READ_DIR_NAME_BUF 256u
+
+typedef struct {
+  char name[READ_DIR_NAME_BUF];
+  uint8_t kind; /* 0=file 1=directory 2=symlink 3=other */
+} readdir_entry;
+
+/* d_type -> the reader's closed four-kind hint vocabulary (index into KIND_HINTS). */
+static const char *const KIND_HINTS[4] = { "file", "directory", "symlink", "other" };
+
+static uint8_t d_type_to_kind_index(uint8_t t) {
+  switch (t) {
+    case DT_REG: return 0;
+    case DT_DIR: return 1;
+    case DT_LNK: return 2;
+    default: return 3; /* FIFO/socket/device/unknown: never followed, never stat'd */
+  }
+}
+
+/*
+ * readDirectoryEntries(fd) -> {ok:true, entries:[{name, kindHint}],
+ * truncated} | {ok:false, code}
+ *
+ * Bounded descriptor-bound directory enumeration (MAC-2D-NATIVE; the ONLY
+ * new native capability). The caller fd is never closed, duplicated, or
+ * consumed:
+ *
+ *   - a PRIVATE descriptor is obtained with openat(fd, ".",
+ *     O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC) — the dot resolves
+ *     within the caller's directory description (no pathname, no
+ *     re-resolution, no cwd); rename/replacement of the directory's old
+ *     lexical pathname cannot redirect it; the private descriptor is a
+ *     NEW open-file description, so caller-visible directory stream
+ *     position state is never shared or advanced;
+ *   - plain dup(fd) was NOT used: dup shares the underlying open-file
+ *     description (shared directory offset), which would make repeated
+ *     enumerations of one caller fd consume each other (probed on the
+ *     real Intel host: dup+fdopendir twice -> 6 entries then 0;
+ *     openat(fd,".")+fdopendir twice -> 6 then 6);
+ *   - fdopendir(priv) takes ownership of the private descriptor; the
+ *     stream (closedir) closes it EXACTLY once on every path;
+ *   - one bounded pass: '.' and '..' skipped; at most
+ *     READ_DIR_ENTRY_CAP entries collected; the (cap+1)-th entry sets
+ *     truncated=true and stops collecting (off-by-one: exactly cap
+ *     entries => truncated:false);
+ *   - bounded native allocation: one fixed calloc of
+ *     READ_DIR_ENTRY_CAP * sizeof(readdir_entry) (~2.6 MB worst case),
+ *     freed on every path; no unbounded list/realloc;
+ *   - d_name handled with strict bounds (d_namlen clamped to
+ *     NAME_BUF-1, NUL-terminated, embedded NUL = malformed => entry
+ *     skipped); entries are raw, in readdir order — sorting and
+ *     maxEntries truncation remain the reader's JS responsibility;
+ *   - kindHint from d_type only; symlinks are returned as entries and
+ *     never followed; unknown types are 'other' (no stat-per-entry
+ *     authority is gained to classify them).
+ *
+ * Result construction allocates many N-API objects; ANY construction
+ * failure after the stream is acquired closes the stream exactly once,
+ * frees the array, and surfaces the established internal-failure
+ * mechanism — no leak on partial construction.
+ */
+static napi_value read_directory_entries(napi_env env, napi_callback_info info) {
+  int fd;
+  if (!parse_fd_only(env, info, &fd)) return result_fail(env, "invalid-input");
+
+  /* 1. Private independent descriptor bound to the SAME directory object. */
+  int priv;
+  do {
+    priv = openat(fd, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  } while (priv < 0 && errno == EINTR);
+  if (priv < 0) return result_fail(env, map_errno(errno));
+
+  /* 2. Directory stream over the PRIVATE descriptor only. */
+  errno = 0;
+  DIR *dir = fdopendir(priv);
+  if (dir == NULL) {
+    int e = errno;
+    close(priv); /* fdopendir failed: we still own priv; close it once */
+    return result_fail(env, map_errno(e));
+  }
+  /* From here, priv is owned by the stream; never close(priv) directly. */
+
+  /* 3. Bounded single pass into a fixed preallocated array. */
+  readdir_entry *entries = (readdir_entry *)calloc(READ_DIR_ENTRY_CAP, sizeof(readdir_entry));
+  if (entries == NULL) {
+    closedir(dir);
+    return result_fail(env, "io-failure");
+  }
+  size_t count = 0;
+  bool truncated = false;
+  for (;;) {
+    errno = 0;
+    struct dirent *d = readdir(dir);
+    if (d == NULL) {
+      if (errno != 0) {
+        int e = errno;
+        closedir(dir);
+        free(entries);
+        return result_fail(env, map_errno(e));
+      }
+      break; /* end of directory */
+    }
+    /* Skip . and .. (the reader's opendir contract excludes them). */
+    if (d->d_name[0] == '.' &&
+        (d->d_name[1] == '\0' || (d->d_name[1] == '.' && d->d_name[2] == '\0'))) {
+      continue;
+    }
+    /* Hard cap: the (cap+1)-th real entry stops collection. */
+    if (count >= READ_DIR_ENTRY_CAP) {
+      truncated = true;
+      break;
+    }
+    /* Strict d_name bounds: clamp d_namlen, NUL-terminate, and skip a
+     * malformed name carrying an embedded NUL (unreachable from the
+     * kernel; defensive — no NUL injection into JS). */
+    size_t namlen = (size_t)d->d_namlen;
+    if (namlen > READ_DIR_NAME_BUF - 1) namlen = READ_DIR_NAME_BUF - 1;
+    if (memchr(d->d_name, '\0', namlen) != NULL) continue;
+    memcpy(entries[count].name, d->d_name, namlen);
+    entries[count].name[namlen] = '\0';
+    entries[count].kind = d_type_to_kind_index(d->d_type);
+    count++;
+  }
+
+  /* 4. Build the JS result; every napi status checked. */
+  napi_value result_obj, ok_val, entries_arr, truncated_val, entry_obj, name_str, kind_str;
+  if (napi_create_object(env, &result_obj) != napi_ok) goto internal_fail;
+  if (napi_get_boolean(env, true, &ok_val) != napi_ok) goto internal_fail;
+  if (napi_set_named_property(env, result_obj, "ok", ok_val) != napi_ok) goto internal_fail;
+  if (napi_create_array_with_length(env, count, &entries_arr) != napi_ok) goto internal_fail;
+  for (size_t i = 0; i < count; i++) {
+    const char *kind = KIND_HINTS[entries[i].kind];
+    if (napi_create_object(env, &entry_obj) != napi_ok) goto internal_fail;
+    if (napi_create_string_utf8(env, entries[i].name, NAPI_AUTO_LENGTH, &name_str) != napi_ok) goto internal_fail;
+    if (napi_set_named_property(env, entry_obj, "name", name_str) != napi_ok) goto internal_fail;
+    if (napi_create_string_utf8(env, kind, NAPI_AUTO_LENGTH, &kind_str) != napi_ok) goto internal_fail;
+    if (napi_set_named_property(env, entry_obj, "kindHint", kind_str) != napi_ok) goto internal_fail;
+    if (napi_set_element(env, entries_arr, (uint32_t)i, entry_obj) != napi_ok) goto internal_fail;
+  }
+  if (napi_set_named_property(env, result_obj, "entries", entries_arr) != napi_ok) goto internal_fail;
+  if (napi_get_boolean(env, truncated, &truncated_val) != napi_ok) goto internal_fail;
+  if (napi_set_named_property(env, result_obj, "truncated", truncated_val) != napi_ok) goto internal_fail;
+  closedir(dir);
+  free(entries);
+  return result_obj;
+
+internal_fail:
+  /* Close the stream (which owns the private descriptor) EXACTLY once,
+   * free the fixed allocation, never touch the caller fd, and surface the
+   * established internal-failure mechanism. */
+  closedir(dir);
+  free(entries);
+  napi_throw_error(env, NULL, "gateway-fs: internal result construction failure");
+  return NULL;
+}
+
 
 #define EXPORT(name, fn) \
   { name, NULL, (fn), NULL, NULL, NULL, napi_writable | napi_enumerable, NULL }
@@ -340,8 +509,9 @@ static napi_value module_init(napi_env env, napi_value exports) {
     EXPORT("openExistingFileAt", open_existing_file_at),
     EXPORT("unlinkAt", unlink_at),
     EXPORT("getPath", get_path),
+    EXPORT("readDirectoryEntries", read_directory_entries),
   };
-  if (napi_define_properties(env, exports, 5, props) != napi_ok) {
+  if (napi_define_properties(env, exports, 6, props) != napi_ok) {
     napi_throw_error(env, NULL, "gateway-fs: module registration failure");
     return NULL;
   }
