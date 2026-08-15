@@ -350,7 +350,13 @@ test('writing: an intermediate directory swapped after revalidation cannot redir
       writeOptions(ws, executor),
     ));
     assert.equal(r.category, 'executor-failure');
-    assert.equal(r.reason, 'parent-not-verified', 'the anchored parent no longer resolves to the accepted canonical ancestor');
+    // Fail-closed race outcome: on Linux the anchored walk follows the
+    // swapped symlink and diverges at the resolution-path identity check
+    // (parent-not-verified); on Darwin the per-component O_NOFOLLOW
+    // descent refuses the symlink at open (parent-not-directory or
+    // symlink-loop — strictly stronger, MAC-2B). All three are closed
+    // executor codes; nothing was created either way.
+    assert.equal(['parent-not-verified', 'parent-not-directory', 'symlink-loop'].includes(r.reason ?? ''), true, `unexpected reason ${r.reason}`);
     assert.equal(fs.existsSync(join(outside, 'd2', 'task.json')), false, 'no file was created outside the artifact region');
     assert.equal(fs.existsSync(join(ws.artifactRoot, 'sub', 'd2', 'task.json')), false, 'no file was created through the swapped component');
   } finally {

@@ -73,5 +73,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/mfx-labs/project-gateway.git"
+  },
+  "imports": {
+    "#gateway-native": "./native/index.mjs"
   }
 }

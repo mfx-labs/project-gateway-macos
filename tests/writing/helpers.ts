@@ -67,7 +67,11 @@ export interface FsWorkspace {
 }
 
 export function makeFsWorkspace(): FsWorkspace {
-  const workspaceRoot = mkdtempSync(join(tmpdir(), 'wp11s1-'));
+  // realpath-canonical root: production canonical roots are symlink-resolved
+  // (canonicalizeRoot, src/trusted/roots.ts) and the native seam's
+  // F_GETPATH identity returns vnode-canonical paths (e.g. /private/var/…
+  // for /var/…) — MAC-2B. Tests must mirror the production canonical shape.
+  const workspaceRoot = realpathSync(mkdtempSync(join(tmpdir(), 'wp11s1-')));
   chmodSync(workspaceRoot, 0o700);
   const artifactRoot = join(workspaceRoot, 'artifacts');
   mkdirSync(artifactRoot, { mode: 0o700 });

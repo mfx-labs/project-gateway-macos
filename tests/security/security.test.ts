@@ -135,6 +135,12 @@ test('security: production modules perform no hidden filesystem/network/process 
   // (tests/writing/static-guard.test.ts) proving that node:fs appears ONLY
   // in the injected host write executor (exact create-only API discipline)
   // and that the pure core is I/O-free; excluded here by boundary.
+  // The MAC-2B Darwin integration adapter (src/internal/darwin-fs) is part
+  // of that same writing boundary: it is the executor's only bridge to the
+  // accepted five-primitive native seam (closeSync for intermediate
+  // descent fds only; no path opens, no mutation, no /proc), covered by
+  // tests/writing/static-guard.test.ts and the adapter suite; excluded
+  // here by boundary.
   // WP-13B completion/result (src/completion): a dedicated module boundary
   // with its own stricter guard
   // (tests/unit/wp13b-static-guard.test.ts) proving that node:fs appears
@@ -149,7 +155,7 @@ test('security: production modules perform no hidden filesystem/network/process 
   // loader, and that the boundary composes the trusted control-plane
   // bootstrap action without minting provenance; excluded here by boundary.
   const prodFiles = walk(DIST)
-    .filter((p) => !p.includes('conformance') && !p.includes('/adapters/') && !p.includes('/reader/') && !p.includes('/git/') && !p.includes('/fff/') && !p.includes('/runtime/') && !p.includes('/writing/') && !p.includes('/completion/') && !p.includes('/bootstrap/'))
+    .filter((p) => !p.includes('conformance') && !p.includes('/adapters/') && !p.includes('/reader/') && !p.includes('/git/') && !p.includes('/fff/') && !p.includes('/runtime/') && !p.includes('/writing/') && !p.includes('/internal/darwin-fs/') && !p.includes('/completion/') && !p.includes('/bootstrap/'))
     .filter((p) => !isStorageFsDelegatedModule(p));
   for (const p of prodFiles) {
     if (p.includes('runner.js') || p.includes('corpus-bundle')) continue;

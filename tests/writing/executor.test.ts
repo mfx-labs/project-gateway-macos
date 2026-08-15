@@ -197,7 +197,7 @@ test('executor: a symlink at the parent path fails closed (no-follow) and is nev
   }
 });
 
-test('executor: an intermediate component swapped to a symlink outside the root is caught by the descriptor identity check', () => {
+test('executor: an intermediate component swapped to a symlink outside the root fails closed — never followed, never created into', () => {
   const ws = makeFsWorkspace();
   try {
     mkdirSync(join(ws.artifactRoot, 'sub'), { mode: 0o700 });
@@ -206,9 +206,12 @@ test('executor: an intermediate component swapped to a symlink outside the root 
     mkdirSync(outside, { mode: 0o700 });
     mkdirSync(join(outside, 'd2'), { mode: 0o700 });
     // Evidence claims the accepted canonical ancestor is root/sub/d2 (as
-    // observed before the race); the filesystem now has sub -> outside,
-    // so the anchored parent walk resolves to outside/d2 and the
-    // descriptor-bound resolution-path identity check must fail closed.
+    // observed before the race); the filesystem now has sub -> outside.
+    // The anchored parent walk must fail closed: on Linux the resolved
+    // path diverges at the identity check (parent-not-verified); on Darwin
+    // the per-component O_NOFOLLOW descent refuses the swapped symlink at
+    // open time (parent-not-directory/symlink-loop — strictly stronger,
+    // MAC-2B). Every outcome below is fail-closed with no create.
     fs.rmSync(join(ws.artifactRoot, 'sub'), { recursive: true });
     symlinkSync(outside, join(ws.artifactRoot, 'sub'));
     const r = executeDraftFileWrite(evidence(ws, {
@@ -218,7 +221,7 @@ test('executor: an intermediate component swapped to a symlink outside the root 
     }));
     assert.equal(r.ok, false);
     if (!r.ok) {
-      assert.equal(r.code, 'parent-not-verified', 'the anchored parent no longer resolves to the accepted canonical ancestor');
+      assert.equal(['parent-not-verified', 'parent-not-directory', 'symlink-loop'].includes(r.code), true, `unexpected code ${r.code}`);
       assert.equal(r.cleanup, 'not-needed');
     }
     assert.equal(fs.existsSync(join(outside, 'd2', 'task.json')), false, 'no file was created outside the artifact region');

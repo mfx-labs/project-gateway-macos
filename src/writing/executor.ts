@@ -10,31 +10,42 @@
  * absolute destination.
  *
  * DESCRIPTOR-ANCHORED MODEL (accepted WP-7 / reader lane precedent,
- * SYM-009/SYM-010/SYM-011; `src/reader/fs.ts`):
+ * SYM-009/SYM-010/SYM-011; `src/reader/fs.ts`; MAC-2B Darwin
+ * integration):
  *
  *   1. open the accepted canonical artifact root O_RDONLY|O_DIRECTORY|
  *      O_NOFOLLOW and retain its descriptor for the whole operation;
  *      fstat-verify it (directory, service UID);
  *   2. open the destination parent RELATIVE TO THAT RETAINED DESCRIPTOR
- *      (`/proc/self/fd/<rootFd>/<canonical-ancestor-relative>`) with
- *      O_DIRECTORY|O_NOFOLLOW; fstat-verify it (directory, service UID);
- *      verify its descriptor-bound resolution path
- *      (`readlink(/proc/self/fd/<parentFd>)`) equals the accepted canonical
- *      existing-directory ancestor — an intermediate component replaced by
- *      a symlink after revalidation diverges here and fails closed
- *      (`parent-not-verified`);
+ *      — on Darwin, one single-component `openat(O_DIRECTORY|O_NOFOLLOW)`
+ *      per path component through the accepted native seam
+ *      (`src/internal/darwin-fs/adapter.ts`, MAC-1 addon); fstat-verify
+ *      it (directory, service UID); verify its descriptor-bound
+ *      resolution path (`fcntl(F_GETPATH)` through the seam) equals the
+ *      accepted canonical existing-directory ancestor — an intermediate
+ *      component replaced by a symlink after revalidation diverges here
+ *      and fails closed (`parent-not-verified`);
  *   3. exclusive-create the target through the anchored parent — the
  *      create/unlink path is EXACTLY ONE FINAL COMPONENT below the
- *      verified parent (`/proc/self/fd/<parentFd>/<singleComponent>`):
- *      a multi-component tail (missing intermediate directories) fails
- *      closed with `missing-parent` BEFORE any filesystem operation, and
- *      no tail component is ever traversed, followed, or created;
- *      O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW with the fixed
- *      implementation-owned mode;
+ *      verified parent: a multi-component tail (missing intermediate
+ *      directories) fails closed with `missing-parent` BEFORE any
+ *      filesystem operation, and no tail component is ever traversed,
+ *      followed, or created; O_CREAT|O_EXCL|O_WRONLY|O_NOFOLLOW with the
+ *      fixed implementation-owned mode (0600, owned by the native
+ *      seam);
  *   4. fchmod to the fixed mode (umask-independent), fstat-verify the
  *      created object (regular file, service UID, exact mode);
  *   5. write the exact bytes (bounded loop; short writes continue);
  *   6. close; return a typed result.
+ *
+ * Darwin mechanism note (MAC-2B): the inherited Linux
+ * `/proc/self/fd/<fd>/<relative>` descriptor-relative opens and
+ * `readlink('/proc/self/fd/<fd>')` identity checks are replaced by the
+ * accepted five-function native seam (openat/unlinkat/F_GETPATH).
+ * `getPath` output is identity evidence only and is never used for an
+ * open/create/unlink. Node's public fs API cannot express
+ * descriptor-relative opens on Darwin; the seam is the ONLY
+ * filesystem-mutation boundary below this module.
  *
  * The retained root descriptor pins the artifact-root inode: a root
  * replacement AFTER anchoring cannot redirect the write (the anchored chain
@@ -56,9 +67,10 @@
  * PARTIAL-WRITE FAILURE: if this operation created the target and then
  * failed before successful completion, exactly one bounded best-effort
  * unlink attempt is made THROUGH THE SAME VERIFIED PARENT descriptor and
- * the SAME single final component (`/proc/self/fd/<parentFd>/<component>`)
- * — cleanup never re-resolves an arbitrary absolute lexical path and can
- * never leave the verified parent. The result distinguishes `removed` from
+ * the SAME single final component (descriptor-relative `unlinkat` through
+ * the native seam) — cleanup never re-resolves an arbitrary absolute
+ * lexical path and can never leave the verified parent. The result
+ * distinguishes `removed` from
  * `failed` (indeterminate state).
  *
  * Errors are typed closed-vocabulary codes; raw errno, paths, and stacks
@@ -71,8 +83,9 @@
  * and the created file to satisfy the service-user ownership checks below;
  * unsupported ownership layouts fail closed.
  */
-import { constants, openSync, closeSync, writeSync, fchmodSync, fstatSync, unlinkSync, readlinkSync } from 'node:fs';
+import { constants, openSync, closeSync, writeSync, fchmodSync, fstatSync } from 'node:fs';
 import { ARTIFACT_DRAFT_LOCATION_KINDS } from '../trusted/index.js';
+import { descentToParent, verifyParentIdentity, createExclusiveFile, unlinkCreated } from '../internal/darwin-fs/adapter.js';
 import { WRITE_CANONICAL_UTF8_MAX_BYTES } from './types.js';
 import type {
   DraftWriteExecutorFailureCode,
@@ -80,15 +93,10 @@ import type {
   DraftWriteExecutorResult,
 } from './types.js';
 
-const { O_CREAT, O_EXCL, O_WRONLY, O_RDONLY, O_NOFOLLOW, O_DIRECTORY } = constants;
+const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = constants;
 
 /** Fixed implementation-owned artifact draft file mode (the caller never controls it). */
 export const DRAFT_FILE_MODE = 0o600;
-
-/** Descriptor-anchored path: resolves relative to the already-open directory object. */
-function fdRelativePath(fd: number, relative: string): string {
-  return `/proc/self/fd/${fd}/${relative}`;
-}
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -180,14 +188,10 @@ function errnoOf(err: unknown): string | undefined {
  * THIS operation, through the SAME verified parent descriptor that created
  * it and the SAME single final component — never through a re-resolved
  * absolute lexical path and never through a joined multi-component path.
+ * (MAC-2B: descriptor-relative unlinkat through the native seam.)
  */
 function cleanupCreatedTarget(parentFd: number, finalComponent: string): 'removed' | 'failed' {
-  try {
-    unlinkSync(fdRelativePath(parentFd, finalComponent));
-    return 'removed';
-  } catch {
-    return 'failed';
-  }
+  return unlinkCreated(parentFd, finalComponent);
 }
 
 /**
@@ -238,7 +242,8 @@ export function executeDraftFileWrite(input: DraftWriteExecutorInput): DraftWrit
   // multi-component tail means intermediate directories are missing; Slice 1
   // has no directory-creation authority and never traverses, follows, or
   // creates tail components (O_NOFOLLOW would protect only a final
-  // component, so no multi-component path may ever reach openSync/unlinkSync).
+  // component, so no multi-component path may ever reach the create/unlink
+  // boundary (the native seam accepts exactly one final component).
   // A zero-length tail is inconsistent with an accepted `missing` decision
   // (TAD-037) and is invalid evidence.
   if (tail.length !== 1) {
@@ -278,10 +283,15 @@ export function executeDraftFileWrite(input: DraftWriteExecutorInput): DraftWrit
     //    with descriptor-bound verification and resolution-path identity
     //    against the accepted canonical ancestor. When the accepted
     //    ancestor IS the artifact root, the retained root descriptor is the
-    //    verified parent.
+    //    verified parent. (MAC-2B: single-component openat descent through
+    //    the native seam; identity via fcntl(F_GETPATH).)
     if (input.canonicalAncestorRelativePath !== '') {
+      const descended = descentToParent(rootFd, input.canonicalAncestorRelativePath);
+      if (!descended.ok) {
+        return { ok: false, code: descended.code, cleanup: 'not-needed' };
+      }
+      parentFd = descended.parentFd;
       try {
-        parentFd = openSync(fdRelativePath(rootFd, input.canonicalAncestorRelativePath), O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
         const parentStat = fstatSync(parentFd);
         if (!parentStat.isDirectory()) {
           return { ok: false, code: 'parent-not-directory', cleanup: 'not-needed' };
@@ -289,20 +299,15 @@ export function executeDraftFileWrite(input: DraftWriteExecutorInput): DraftWrit
         if (parentStat.uid !== serviceUid) {
           return { ok: false, code: 'permission-denied', cleanup: 'not-needed' };
         }
-        // SYM-009 resolution-path verification: the opened parent's
-        // descriptor must resolve to the accepted canonical ancestor; an
-        // intermediate component replaced after revalidation diverges here.
-        let resolvedParent: string;
-        try {
-          resolvedParent = readlinkSync(`/proc/self/fd/${parentFd}`);
-        } catch {
-          return { ok: false, code: 'parent-not-verified', cleanup: 'not-needed' };
-        }
-        if (resolvedParent !== input.canonicalExistingDirectoryAncestor) {
-          return { ok: false, code: 'parent-not-verified', cleanup: 'not-needed' };
-        }
-      } catch (err) {
-        return { ok: false, code: mapOpenError(errnoOf(err)), cleanup: 'not-needed' };
+      } catch {
+        return { ok: false, code: 'io-failure', cleanup: 'not-needed' };
+      }
+      // SYM-009 resolution-path verification: the opened parent's
+      // descriptor must resolve to the accepted canonical ancestor; an
+      // intermediate component replaced after revalidation diverges here.
+      const identity = verifyParentIdentity(parentFd, input.canonicalExistingDirectoryAncestor);
+      if (!identity.ok) {
+        return { ok: false, code: 'parent-not-verified', cleanup: 'not-needed' };
       }
     } else {
       parentFd = rootFd;
@@ -310,17 +315,17 @@ export function executeDraftFileWrite(input: DraftWriteExecutorInput): DraftWrit
 
     // 3. Exclusive create through the anchored parent: EXACTLY ONE final
     //    component below the verified parent descriptor (no intermediate
-    //    components exist in the create path), no-follow, fixed mode. Any
-    //    existing target (file, directory, symlink, dangling symlink,
-    //    unsupported kind) fails closed here as a typed conflict — never
-    //    overwrite/update.
-    const createPath = fdRelativePath(parentFd, finalComponent);
-    try {
-      fd = openSync(createPath, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, DRAFT_FILE_MODE);
-      created = true;
-    } catch (err) {
-      return { ok: false, code: mapOpenError(errnoOf(err)), cleanup: 'not-needed' };
+    //    components exist in the create path), no-follow, fixed mode 0600
+    //    (owned by the native seam). Any existing target (file, directory,
+    //    symlink, dangling symlink, unsupported kind) fails closed here as
+    //    a typed conflict — never overwrite/update. (MAC-2B:
+    //    createExclusiveFileAt through the native seam.)
+    const createdResult = createExclusiveFile(parentFd, finalComponent);
+    if (!createdResult.ok) {
+      return { ok: false, code: createdResult.code, cleanup: 'not-needed' };
     }
+    fd = createdResult.fd;
+    created = true;
     const targetFd = fd;
 
     // 4. Fixed mode (umask-independent) and descriptor verification of the
