@@ -27,7 +27,8 @@
   "files": [
     "dist",
     "native/index.mjs",
-    "native/darwin-x64/gateway_fs.node"
+    "native/darwin-x64/gateway_fs.node",
+    "native/darwin-arm64/gateway_fs.node"
   ],
   "engines": {
     "node": ">=22.0.0"
