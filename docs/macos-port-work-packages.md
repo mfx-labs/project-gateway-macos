@@ -122,8 +122,21 @@ MAC-0 → MAC-1 → MAC-2 → MAC-3 → MAC-4 ─┐
   filesystem security tests green; real MCP persist over stdio
   (`persist-artifact` on a real workspace) green; nine-tool surface
   verified over a live MCP session.
-- **Focused tests:** full runtime suite + live MCP session evidence;
-  store bootstrap + persist + verify + audit round-trip on real APFS.
+- **Focused physical acceptance chain:** real operator `bootstrap` → optional
+  public `draft-artifact` → `persist-artifact` → independent APFS
+  verification → public `inspect-changes` proposal observation → public
+  `inspect-registry` non-mutation check → create-only conflict /
+  unknown-workspace denial → continuity / clean exit. The persisted proposal
+  is an untrusted project-visible file; `inspect-changes` observes fresh
+  workspace proposal state; `inspect-stored-record` and `verify-record` read
+  verified store records only; `inspect-audit-history` reads audit history
+  for a verified store record only. MAC-4 MUST NOT create a trusted lifecycle
+  transition merely to satisfy acceptance.
+- **Trusted-record sequencing:** a verified-record `verify-record` /
+  `inspect-audit-history` sequence belongs to MAC-6 or another separately
+  authorized trusted-lifecycle gate, not to the proposal-persist path above.
+- **Focused tests:** full runtime suite + live MCP session evidence for the
+  physical acceptance chain above on real APFS.
 - **Gates:** human acceptance sign-off on the x64 evidence bundle.
 
 ## MAC-5 — Apple Silicon build/runtime acceptance
