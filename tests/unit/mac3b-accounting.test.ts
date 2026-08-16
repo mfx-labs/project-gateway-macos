@@ -56,7 +56,7 @@ const DARWIN_SHAPE =
   '    ok 3 - unrelated host git processes are ignored (ownership-aware) # SKIP /proc process-table observation is Linux-only (MAC-2D lane)\n';
 
 test('accounting: manifest sanity — exact counts and the exact Darwin permit allowlist', () => {
-  assert.equal(EXPECTED_COUNTS.reader, 68, 'reader count restored to the authorized actual');
+  assert.equal(EXPECTED_COUNTS.reader, 83, 'reader count matches the executed actual (68 + 15 MAC-3D hostile tests)');
   assert.equal(EXPECTED_COUNTS.git, 41);
   assert.equal(EXPECTED_COUNTS.fff, 26);
   assert.equal(EXPECTED_COUNTS.security, 40, 'security count restored to the executed actual');
@@ -103,20 +103,20 @@ test('accounting: skip-count mismatch fails', () => {
 });
 
 test('accounting: exact executed-count mismatch fails', () => {
-  const r = evaluateSuite('reader', 68, 0, 'ok 1 - a\n' + summary(67, 67, 0, 0, 0, 0), []);
+  const r = evaluateSuite('reader', 83, 0, 'ok 1 - a\n' + summary(67, 67, 0, 0, 0, 0), []);
   assert.equal(r.ok, false);
-  assert.ok(r.problems.some((p) => p.includes('expected 68 executed tests, summary reports 67')), JSON.stringify(r.problems));
+  assert.ok(r.problems.some((p) => p.includes('expected 83 executed tests, summary reports 67')), JSON.stringify(r.problems));
 });
 
 test('accounting: zero-skip suite passes on the exact executed count', () => {
-  const r = evaluateSuite('reader', 68, 0, 'ok 1 - a\n' + summary(68, 68, 0, 0, 0, 0), []);
+  const r = evaluateSuite('reader', 83, 0, 'ok 1 - a\n' + summary(83, 83, 0, 0, 0, 0), []);
   assert.equal(r.ok, true, JSON.stringify(r.problems));
 });
 
 test('accounting: unexpected skip on a zero-skip suite fails', () => {
   const r = evaluateSuite(
-    'reader', 68, 0,
-    'ok 1 - a\n    ok 1 - x # SKIP unexpected\n' + summary(68, 67, 0, 0, 1, 0),
+    'reader', 83, 0,
+    'ok 1 - a\n    ok 1 - x # SKIP unexpected\n' + summary(83, 82, 0, 0, 1, 0),
     [],
   );
   assert.equal(r.ok, false);
@@ -126,7 +126,7 @@ test('accounting: unexpected skip on a zero-skip suite fails', () => {
 test('accounting: nested/indented subtest skips are still detected (indentation never hides a skip)', () => {
   const deep = 'ok 1 - suite\n        ok 1 - deep # SKIP reason\n';
   assert.deepEqual(parseSkippedNames(deep), ['deep']);
-  const r = evaluateSuite('reader', 68, 0, 'ok 1 - a\n' + deep + summary(68, 67, 0, 0, 1, 0), []);
+  const r = evaluateSuite('reader', 83, 0, 'ok 1 - a\n' + deep + summary(83, 82, 0, 0, 1, 0), []);
   assert.equal(r.ok, false, 'an indented skip on a zero-skip suite must fail');
 });
 
@@ -147,7 +147,7 @@ test('accounting: a # inside a test name is not a skip marker', () => {
   assert.deepEqual(parseSkippedNames(line), []);
   // The #-named test is a NORMAL passing test: with a zero-skip permit
   // list the suite passes — the name is never mistaken for a skip.
-  const r = evaluateSuite('reader', 68, 0, line + summary(68, 68, 0, 0, 0, 0), []);
+  const r = evaluateSuite('reader', 83, 0, line + summary(83, 83, 0, 0, 0, 0), []);
   assert.equal(r.ok, true, JSON.stringify(r.problems));
 });
 

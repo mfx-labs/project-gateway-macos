@@ -54,7 +54,7 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-export const EXPECTED_COUNTS = Object.freeze({ reader: 68, git: 41, fff: 26, security: 40 });
+export const EXPECTED_COUNTS = Object.freeze({ reader: 83, git: 41, fff: 26, security: 40 });
 
 /**
  * Exact per-platform permitted-skip allowlist (MAC-3B). A skipped test is
