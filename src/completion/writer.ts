@@ -90,11 +90,34 @@ export interface ResultWriteInput {
   /** Exact canonical result bytes. */
   readonly bytes: Uint8Array;
   /**
-   * Test/host seam (the WP-11 race-coverage pattern): runs after the root
-   * descriptor is anchored, before the anchored descent. A throwing hook
-   * is a typed failure before any create.
+   * Test/host seam (the WP-11 race-coverage pattern; MAC-3B additions):
+   * optional hooks that run at exact deterministic boundaries for
+   * hostile-race coverage. Each hook is invoked ONLY when present; absent
+   * hooks leave production behavior byte-for-byte unchanged. Hook
+   * functions cannot arrive through JSON or MCP schemas (functions are
+   * not serializable; no production caller supplies hooks); a hostile
+   * non-function value fails closed through the typed writer error path.
+   *   - `afterRootOpen`: after the root descriptor is anchored, before
+   *     the anchored descent. A throwing hook is a typed failure before
+   *     any create.
+   *   - `afterCreateConflict`: after the exclusive create reports
+   *     `exists`, before the anchored recovery read (MAC-3B). No fd
+   *     exists at this boundary (the failed create returned none) and
+   *     nothing has been or will be mutated; a throwing hook is a typed
+   *     fail-closed `io-failure` that leaves the pre-existing target
+   *     untouched (no recovery, no cleanup, no unlink).
+   *   - `beforeWrite`: after a successful exclusive create, while the
+   *     created fd is owned, immediately before the bounded write loop
+   *     (MAC-3B). A throwing hook enters the EXISTING created-path
+   *     failure handling: the created object is removed through
+   *     `cleanupCreated(parentFd, finalComponent)` (at most one
+   *     best-effort attempt) and the result is a typed `io-failure`.
    */
-  readonly hooks?: { readonly afterRootOpen?: () => void };
+  readonly hooks?: {
+    readonly afterRootOpen?: () => void;
+    readonly afterCreateConflict?: () => void;
+    readonly beforeWrite?: () => void;
+  };
 }
 
 /** The deterministic destination relative to the result root. */
@@ -316,6 +339,16 @@ export function writeResultArtifact(input: ResultWriteInput): ResultWriteOutcome
     const createdResult = createExclusiveFileWriter(parentFd, finalComponent);
     if (!createdResult.ok) {
       if (createdResult.code === 'exists') {
+        // MAC-3B seam: exact EEXIST→recovery boundary. No fd exists here
+        // (the failed create returned none); a throwing hook is a typed
+        // fail-closed io-failure with NO recovery read, NO cleanup, and NO
+        // unlink of the pre-existing target; parent/root ownership is
+        // unchanged (the outer finally still closes them exactly once).
+        try {
+          input.hooks?.afterCreateConflict?.();
+        } catch {
+          return { ok: false, code: 'io-failure' };
+        }
         return readExistingForRecovery(parentFd, finalComponent, input.serviceUid, input.bytes);
       }
       return { ok: false, code: createdResult.code };
@@ -323,8 +356,15 @@ export function writeResultArtifact(input: ResultWriteInput): ResultWriteOutcome
     fd = createdResult.fd;
     created = true;
 
-    // 4. Exact byte write (bounded loop; short writes continue).
+    // 4. Exact byte write (bounded loop; short writes continue). The
+    //    MAC-3B seam runs after the exclusive create, immediately before
+    //    the write, INSIDE the created-path failure handling: a throwing
+    //    hook is caught by the existing catch below, which performs the
+    //    single best-effort cleanupCreated(parentFd, finalComponent) and
+    //    returns a typed io-failure; the inner finally closes the created
+    //    fd exactly once. Absent hooks: production behavior unchanged.
     try {
+      input.hooks?.beforeWrite?.();
       let offset = 0;
       while (offset < input.bytes.byteLength) {
         const written = writeSync(fd, input.bytes, offset, input.bytes.byteLength - offset, offset);
