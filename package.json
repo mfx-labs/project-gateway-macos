@@ -34,7 +34,7 @@
     "generate": "node scripts/generate-bundle.mjs",
     "build": "npm run generate && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run clean:generated && npm run build && tsc -p tsconfig.tests.json && node scripts/wp7-discovery-guard.mjs && node --test \"dist-test/tests/unit/*.test.js\" \"dist-test/tests/integration/*.test.js\" \"dist-test/tests/security/*.test.js\" \"dist-test/tests/pi-adapter/unit/*.test.js\" \"dist-test/tests/pi-adapter/integration/*.test.js\" \"dist-test/tests/pi-adapter/security/*.test.js\" \"dist-test/tests/pi-adapter/compatibility/*.test.js\" \"dist-test/tests/pi-adapter/enforcement/*.test.js\" \"dist-test/tests/mcp/unit/*.test.js\" \"dist-test/tests/runtime/*.test.js\" \"dist-test/tests/drafting/*.test.js\" \"dist-test/tests/writing/*.test.js\" \"dist-test/tests/trusted/*.test.js\" \"dist-test/tests/pointofuse-v2/*.test.js\" && node scripts/run-wp7-tests.mjs",
+    "test": "npm run clean:generated && npm run build && tsc -p tsconfig.tests.json && node scripts/wp7-discovery-guard.mjs && node scripts/run-test-inventory.mjs && node scripts/run-wp7-tests.mjs",
     "test:unit": "node --test \"dist-test/tests/unit/*.test.js\"",
     "test:integration": "node --test \"dist-test/tests/integration/*.test.js\"",
     "test:conformance": "node --test \"dist-test/tests/integration/*.test.js\"",

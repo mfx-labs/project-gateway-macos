@@ -66,6 +66,13 @@ export const RESULT_BYTE_LIMIT = INPUT_BYTE_LIMITS.artifact;
 const OCCURRENCE_ID_RE = /^pgw:o:[0-9a-f]{32}$/;
 const ATTEMPT_ID_RE = /^pgw:a:[0-9a-f]{32}$/;
 
+// O_EXCL makes the final name visible before the winning writer's first
+// write. A bounded recheck lets an identical concurrent loser observe that
+// in-progress file once it is complete; it never retries a complete conflict.
+const INCOMPLETE_RECOVERY_RECHECKS = 16;
+const INCOMPLETE_RECOVERY_WAIT_MS = 2;
+const incompleteRecoveryWaitWord = new Int32Array(new SharedArrayBuffer(4));
+
 const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = constants;
 export type ResultWriteCode =
   | 'invalid-operand'
@@ -208,49 +215,56 @@ function openVerifiedDirectory(
  * are bounded by the committed byte ceiling.
  */
 function readExistingForRecovery(parentFd: number, finalComponent: string, serviceUid: number, expected: Uint8Array): ResultWriteOutcome {
-  let existingFd: number | undefined;
-  try {
-    // MAC-2C: recovery open through the Darwin seam (openExistingFileAt,
-    // fixed O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC). O_NONBLOCK
-    // guarantees a FIFO at the destination can never block the open; the
-    // fstat below then rejects it as non-regular. A symlinked final
-    // component (dangling or not) is never followed (symlink-refused →
-    // conflict). A native open success is NEVER acceptance by itself.
-    const opened = openExistingFileWriter(parentFd, finalComponent);
-    if (!opened.ok) {
-      return { ok: false, code: opened.code };
-    }
-    existingFd = opened.fd;
-    const stat = fstatSync(existingFd);
-    if (!stat.isFile()) {
-      // Directory/device/socket/FIFO/other kind: not an adoptable
-      // project-visible result file.
-      return { ok: false, code: 'exclusive-create-conflict' };
-    }
-    if (stat.uid !== serviceUid) {
-      return { ok: false, code: 'ownership-mismatch' };
-    }
-    if (stat.size !== expected.byteLength || stat.size > RESULT_BYTE_LIMIT) {
-      return { ok: false, code: 'exclusive-create-conflict' };
-    }
-    const existing = Buffer.allocUnsafe(stat.size);
-    let offset = 0;
-    while (offset < stat.size) {
-      let n: number;
-      try {
-        n = readSync(existingFd, existing, offset, stat.size - offset, offset);
-      } catch {
-        return { ok: false, code: 'io-failure' };
+  for (let rechecksRemaining = INCOMPLETE_RECOVERY_RECHECKS; ; rechecksRemaining--) {
+    let existingFd: number | undefined;
+    let incomplete = false;
+    try {
+      // MAC-2C: recovery open through the Darwin seam (openExistingFileAt,
+      // fixed O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC). O_NONBLOCK
+      // guarantees a FIFO at the destination can never block the open; the
+      // fstat below then rejects it as non-regular. A symlinked final
+      // component (dangling or not) is never followed (symlink-refused →
+      // conflict). A native open success is NEVER acceptance by itself.
+      const opened = openExistingFileWriter(parentFd, finalComponent);
+      if (!opened.ok) {
+        return { ok: false, code: opened.code };
       }
-      if (!Number.isSafeInteger(n) || n <= 0) return { ok: false, code: 'io-failure' };
-      offset += n;
+      existingFd = opened.fd;
+      const stat = fstatSync(existingFd);
+      if (!stat.isFile()) {
+        // Directory/device/socket/FIFO/other kind: not an adoptable
+        // project-visible result file.
+        return { ok: false, code: 'exclusive-create-conflict' };
+      }
+      if (stat.uid !== serviceUid) {
+        return { ok: false, code: 'ownership-mismatch' };
+      }
+      if (stat.size !== expected.byteLength || stat.size > RESULT_BYTE_LIMIT) {
+        incomplete = stat.size < expected.byteLength;
+        if (!incomplete) return { ok: false, code: 'exclusive-create-conflict' };
+      } else {
+        const existing = Buffer.allocUnsafe(stat.size);
+        let offset = 0;
+        while (offset < stat.size) {
+          let n: number;
+          try {
+            n = readSync(existingFd, existing, offset, stat.size - offset, offset);
+          } catch {
+            return { ok: false, code: 'io-failure' };
+          }
+          if (!Number.isSafeInteger(n) || n <= 0) return { ok: false, code: 'io-failure' };
+          offset += n;
+        }
+        if (existing.every((b, i) => b === expected[i])) {
+          return { ok: true, outcome: 'already-exact' };
+        }
+        return { ok: false, code: 'exclusive-create-conflict' };
+      }
+    } finally {
+      closeFd(existingFd);
     }
-    if (existing.every((b, i) => b === expected[i])) {
-      return { ok: true, outcome: 'already-exact' };
-    }
-    return { ok: false, code: 'exclusive-create-conflict' };
-  } finally {
-    closeFd(existingFd);
+    if (!incomplete || rechecksRemaining === 0) return { ok: false, code: 'exclusive-create-conflict' };
+    Atomics.wait(incompleteRecoveryWaitWord, 0, 0, INCOMPLETE_RECOVERY_WAIT_MS);
   }
 }
 

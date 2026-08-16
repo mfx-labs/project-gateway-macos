@@ -414,7 +414,9 @@ test('integration: v2 conformance context dispatches through the internal author
 test('integration: default test workflow includes the PointOfUse-v2 focused suites exactly once', () => {
   const pkg = JSON.parse(readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'));
   const testScript = String(pkg['scripts']['test']);
-  const occurrences = testScript.split('dist-test/tests/pointofuse-v2/*.test.js').length - 1;
+  assert.equal(testScript.split('node scripts/run-test-inventory.mjs').length - 1, 1, 'npm test must invoke the authoritative inventory exactly once');
+  const inventory = readFileSync(fileURLToPath(new URL('../../../scripts/run-test-inventory.mjs', import.meta.url)), 'utf8');
+  const occurrences = inventory.split('dist-test/tests/pointofuse-v2/*.test.js').length - 1;
   assert.equal(occurrences, 1, 'npm test must run the PointOfUse-v2 suites exactly once');
   assert.ok(String(pkg['scripts']['test:pointofuse-v2']).includes('dist-test/tests/pointofuse-v2/*.test.js'));
 });

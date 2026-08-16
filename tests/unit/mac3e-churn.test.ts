@@ -183,10 +183,12 @@ test('mac3e RACE-I16 reader: concurrent file-decoy churn — reads stay confined
     );
     const r = readOutcome as { ok: boolean; code?: string; bytes?: string };
     if (r.ok) {
-      // Any successful read returns exactly one of the churn actor's own
-      // payloads (iteration-N or iteration-N-again) — never bytes from
-      // anywhere else.
-      assert.match(r.bytes!, /^iteration-\d+(-again)?$/, `confined content: ${JSON.stringify(r)}`);
+      // The actor's create/truncate-before-write transition may expose its
+      // own empty file; every non-empty success remains one of its payloads.
+      assert.ok(
+        r.bytes === '' || /^iteration-\d+(-again)?$/.test(r.bytes!),
+        `confined content: ${JSON.stringify(r)}`,
+      );
     } else {
       assert.equal(r.code, 'not-found', `typed reader failure: ${JSON.stringify(r)}`);
     }
