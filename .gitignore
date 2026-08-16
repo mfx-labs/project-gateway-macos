@@ -18,4 +18,5 @@ dist-test/
 # diff source-only; distribution packaging is MAC-7).
 native/build/
 native/darwin-x64/*.node
+!native/darwin-x64/gateway_fs.node
 native/darwin-arm64/*.node
