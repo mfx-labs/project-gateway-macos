@@ -20,22 +20,62 @@ const DANGEROUS_CONFIG_PATTERNS: ReadonlyArray<{ section: string; keyPattern: Re
   { section: 'core', keyPattern: /^fsmonitor$/ },
   { section: 'core', keyPattern: /^hookspath$/ },
   { section: 'diff', keyPattern: /^external$/ },
-  { section: 'diff', keyPattern: /^[^.]+\.command$/ },
-  { section: 'diff', keyPattern: /^[^.]+\.textconv$/ },
+  { section: 'diff', keyPattern: /^command$/ },
+  { section: 'diff', keyPattern: /^textconv$/ },
   { section: 'pager', keyPattern: /.*/ },
   { section: 'credential', keyPattern: /.*/ },
   { section: 'log', keyPattern: /^showsignature$/ },
   { section: 'gpg', keyPattern: /.*/ },
 ];
 
+interface ParsedGitConfigSection {
+  readonly base: string;
+  readonly subsection?: string;
+  readonly keys: Map<string, string>;
+}
+
+/** Parse one section header into its semantic base/subsection identity. */
+function parseGitConfigSection(raw: string, line: number): Omit<ParsedGitConfigSection, 'keys'> | PreflightError {
+  const quotedPrefix = raw.match(/^([A-Za-z0-9][A-Za-z0-9-]*)[ \t]+"/);
+  if (quotedPrefix !== null) {
+    let subsection = '';
+    for (let i = quotedPrefix[0].length; i < raw.length; i++) {
+      const char = raw[i]!;
+      if (char === '"') {
+        if (raw.slice(i + 1).length !== 0) break;
+        return { base: quotedPrefix[1]!.toLowerCase(), subsection };
+      }
+      if (char === '\\') {
+        const escaped = raw[++i];
+        if (escaped !== '"' && escaped !== '\\') break;
+        subsection += escaped;
+        continue;
+      }
+      if (char === '\0') break;
+      subsection += char;
+    }
+    return { code: 'malformed-config', message: `Malformed quoted subsection at line ${line}` };
+  }
+
+  const unquoted = raw.match(/^([A-Za-z0-9][A-Za-z0-9-]*)(?:\.([A-Za-z0-9][A-Za-z0-9-]*))?$/);
+  if (unquoted === null) {
+    return { code: 'malformed-config', message: `Malformed section at line ${line}` };
+  }
+  return {
+    base: unquoted[1]!.toLowerCase(),
+    ...(unquoted[2] !== undefined ? { subsection: unquoted[2].toLowerCase() } : {}),
+  };
+}
+
 /**
- * Parse a simple INI-style config (hostile data, fail on any anomaly).
- * Returns sections as a Map<sectionName, Map<key, value>>.
- * Very strict: rejects accessor-like syntax, duplicates, malformed lines.
+ * Parse a simple Git INI-style config (hostile data, fail on any anomaly).
+ * Modern `[section "subsection"]` syntax is represented as separate base and
+ * subsection fields. Quoted subsections decode only Git's `\"` and `\\`
+ * escapes; every other escape or malformed header fails closed.
  */
-function parseGitConfigStrict(content: string): Map<string, Map<string, string>> | PreflightError {
-  const sections = new Map<string, Map<string, string>>();
-  let currentSection: string | null = null;
+function parseGitConfigStrict(content: string): Map<string, ParsedGitConfigSection> | PreflightError {
+  const sections = new Map<string, ParsedGitConfigSection>();
+  let currentSection: ParsedGitConfigSection | null = null;
   const lines = content.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
@@ -47,18 +87,14 @@ function parseGitConfigStrict(content: string): Map<string, Map<string, string>>
     // Section header
     const sectionMatch = line.match(/^\[([^\]]+)\]$/);
     if (sectionMatch) {
-      const rawSection = sectionMatch[1]!;
-      // Reject subsection quoting and complex syntax
-      if (rawSection.includes('"') || rawSection.includes('\\')) {
-        return { code: 'malformed-config', message: `Complex section quoting at line ${i + 1}` };
+      const parsed = parseGitConfigSection(sectionMatch[1]!, i + 1);
+      if ('code' in parsed) return parsed;
+      const identity = JSON.stringify([parsed.base, parsed.subsection ?? null]);
+      if (sections.has(identity)) {
+        return { code: 'duplicate-section', message: `Duplicate section [${parsed.base}] at line ${i + 1}` };
       }
-      // Normalize section name: strip inline comment, trim
-      const section = rawSection.split(/[;#]/)[0]!.trim().toLowerCase();
-      if (sections.has(section)) {
-        return { code: 'duplicate-section', message: `Duplicate section [${section}] at line ${i + 1}` };
-      }
-      currentSection = section;
-      sections.set(section, new Map());
+      currentSection = { ...parsed, keys: new Map() };
+      sections.set(identity, currentSection);
       continue;
     }
 
@@ -68,13 +104,16 @@ function parseGitConfigStrict(content: string): Map<string, Map<string, string>>
       if (!currentSection) {
         return { code: 'malformed-config', message: `Key outside section at line ${i + 1}` };
       }
-      const key = kvMatch[1]!.trim().toLowerCase();
-      const value = kvMatch[2]!.split(/[;#]/)[0]!.trim();
-      const map = sections.get(currentSection)!;
-      if (map.has(key)) {
-        return { code: 'duplicate-key', message: `Duplicate key ${currentSection}.${key} at line ${i + 1}` };
+      const rawKey = kvMatch[1]!.trim();
+      if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(rawKey)) {
+        return { code: 'malformed-config', message: `Malformed key at line ${i + 1}` };
       }
-      map.set(key, value);
+      const key = rawKey.toLowerCase();
+      const value = kvMatch[2]!.split(/[;#]/)[0]!.trim();
+      if (currentSection.keys.has(key)) {
+        return { code: 'duplicate-key', message: `Duplicate key ${currentSection.base}.${key} at line ${i + 1}` };
+      }
+      currentSection.keys.set(key, value);
       continue;
     }
 
@@ -83,18 +122,9 @@ function parseGitConfigStrict(content: string): Map<string, Map<string, string>>
   return sections;
 }
 
-/**
- * Check if a config section+key matches any dangerous pattern.
- */
-function isDangerousConfig(section: string, key: string): boolean {
-  for (const pattern of DANGEROUS_CONFIG_PATTERNS) {
-    // Match section prefixes like "diff.mytype" → "diff"
-    const sectionBase = section.split('.')[0]!;
-    if (pattern.section === sectionBase || pattern.section === section) {
-      if (pattern.keyPattern.test(key)) return true;
-    }
-  }
-  return false;
+/** Check a semantic section base and key against the dangerous policy. */
+function isDangerousConfig(section: ParsedGitConfigSection, key: string): boolean {
+  return DANGEROUS_CONFIG_PATTERNS.some((pattern) => pattern.section === section.base && pattern.keyPattern.test(key));
 }
 
 /**
@@ -169,10 +199,10 @@ export function preflightGitRepository(
   if ('code' in sections) return sections;
 
   // Check every section+key against dangerous patterns
-  for (const [section, keys] of sections) {
-    for (const key of keys.keys()) {
+  for (const section of sections.values()) {
+    for (const key of section.keys.keys()) {
       if (isDangerousConfig(section, key)) {
-        return { code: 'dangerous-config', message: `Dangerous config: [${section}] ${key}` };
+        return { code: 'dangerous-config', message: `Dangerous config: [${section.base}] ${key}` };
       }
     }
   }

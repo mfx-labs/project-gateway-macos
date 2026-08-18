@@ -105,6 +105,11 @@ function makeE2EFixture(): E2EFixture {
   writeFileSync(join(workspaceRoot, 'src', 'main.ts'), 'export const x = 1;\n');
   git(['add', '.'], workspaceRoot);
   git(['commit', '-q', '-m', 'init'], workspaceRoot);
+  git(['remote', 'add', 'origin', 'https://example.invalid/project.git'], workspaceRoot);
+  git(['remote', 'add', 'ori"gin', 'https://example.invalid/quoted.git'], workspaceRoot);
+  git(['config', 'remote..url', 'https://example.invalid/empty.git'], workspaceRoot);
+  git(['config', 'branch.main.remote', 'origin'], workspaceRoot);
+  git(['config', 'branch.main.merge', 'refs/heads/main'], workspaceRoot);
 
   // Operator startup config: credential-free, lane-bearing.
   const configPath = join(base, 'gateway-config.json');

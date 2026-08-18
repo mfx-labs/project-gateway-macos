@@ -14,19 +14,19 @@ import { createGitFixture, createWp7Fixture, type Wp7Fixture, WORKSPACE_ALPHA } 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { initializeGitHostLane, revalidateGitHostLane, validateHostDirectory } from '../../../src/git/host-lane.js';
+import { initializeGitHostLane, parseGitVersion, revalidateGitHostLane, satisfiesGitMinimum, validateHostDirectory } from '../../../src/git/host-lane.js';
 import { preflightGitRepository, captureRepositoryPreflightFingerprint, revalidateRepositoryPreflightFingerprint, isUnbornRepository } from '../../../src/git/preflight.js';
 import { GitInspectionService } from '../../../src/git/service.js';
 import { GLOBAL_ARGV_TEST, buildGitArgv } from '../../../src/git/wrapper.js';
 
-const GIT_BIN = '/home/chef/.local/git-2.45.4/bin/git';
+const GIT_BIN = process.env.WP7_GIT_BINARY ?? ['/usr/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'].find((p) => fs.existsSync(p)) ?? 'git';
 
 describe('WP-7 Git: host-lane validation', () => {
   it('accepts the verified lane binary', async () => {
     const r = await initializeGitHostLane(GIT_BIN);
     assert.equal(r.ok, true);
     if (r.ok) {
-      assert.equal(r.descriptor.version, '2.45.4');
+      assert.equal(satisfiesGitMinimum(parseGitVersion(`git version ${r.descriptor.version}`)), true);
       assert.ok(r.descriptor.initialFingerprint.sha256.length === 64);
     }
   });
@@ -155,12 +155,43 @@ describe('WP-7 Git: host-lane validation', () => {
 });
 
 describe('WP-7 Git: repository preflight', () => {
-  it('accepts a regular repository', () => {
+  it('accepts real Git-generated ordinary, escaped, and legacy subsection configs', () => {
     const g = createGitFixture();
     try {
-      assert.equal(preflightGitRepository(g.root), null);
+      execFileSync(GIT_BIN, ['-C', g.root, 'remote', 'add', 'origin', 'https://example.invalid/project.git']);
+      execFileSync(GIT_BIN, ['-C', g.root, 'remote', 'add', 'ori"gin', 'https://example.invalid/quoted.git']);
+      execFileSync(GIT_BIN, ['-C', g.root, 'config', 'remote.ori\\gin.url', 'https://example.invalid/backslash.git']);
+      execFileSync(GIT_BIN, ['-C', g.root, 'config', 'remote.safe-key', 'value']);
+      execFileSync(GIT_BIN, ['-C', g.root, 'config', 'remote..url', 'https://example.invalid/empty.git']);
+      execFileSync(GIT_BIN, ['-C', g.root, 'config', 'branch.main.remote', 'origin']);
+      execFileSync(GIT_BIN, ['-C', g.root, 'config', 'branch.main.merge', 'refs/heads/main']);
+      const config = fs.readFileSync(path.join(g.root, '.git', 'config'), 'utf8');
+      assert.ok(config.includes('[remote "origin"]'));
+      assert.ok(config.includes('[remote "ori\\"gin"]'));
+      assert.ok(config.includes('[remote "ori\\\\gin"]'));
+      assert.ok(config.includes('[remote]'));
+      assert.ok(config.includes('[remote ""]'));
+      assert.ok(config.includes('[branch "main"]'));
+      assert.equal(preflightGitRepository(g.root), null, '[remote] and [remote ""] must retain distinct identities');
+      const fingerprint = captureRepositoryPreflightFingerprint(g.root);
+      assert.notEqual(fingerprint, null);
+      if (fingerprint) assert.equal(revalidateRepositoryPreflightFingerprint(g.root, fingerprint), null);
     } finally {
       g.cleanup();
+    }
+
+    const legacy = createGitFixture('[remote.origin]\n\turl = https://example.invalid/project.git\n');
+    try {
+      assert.equal(preflightGitRepository(legacy.root), null);
+    } finally {
+      legacy.cleanup();
+    }
+
+    const outerWhitespace = createGitFixture('  [remote "origin"]   \n\turl = https://example.invalid/project.git\n');
+    try {
+      assert.equal(preflightGitRepository(outerWhitespace.root), null);
+    } finally {
+      outerWhitespace.cleanup();
     }
   });
 
@@ -186,11 +217,12 @@ describe('WP-7 Git: repository preflight', () => {
     }
   });
 
-  it('rejects conditional includeIf', () => {
+  it('rejects quoted includeIf by semantic section policy', () => {
     const g = createGitFixture('[includeIf "gitdir:/x"]\n\tpath = /etc/passwd\n');
     try {
       const err = preflightGitRepository(g.root);
       assert.notEqual(err, null);
+      if (err) assert.equal(err.code, 'dangerous-config');
     } finally {
       g.cleanup();
     }
@@ -216,26 +248,38 @@ describe('WP-7 Git: repository preflight', () => {
     }
   });
 
-  it('rejects diff.external and diff driver command', () => {
-    const g1 = createGitFixture('[diff]\n\texternal = /bin/echo\n');
-    try {
-      assert.notEqual(preflightGitRepository(g1.root), null);
-    } finally { g1.cleanup(); }
-    const g2 = createGitFixture('[diff "mydriver"]\n\tcommand = /bin/echo\n');
-    try {
-      assert.notEqual(preflightGitRepository(g2.root), null);
-    } finally { g2.cleanup(); }
+  it('rejects diff.external and quoted diff-driver helpers by semantic section policy', () => {
+    const configs = [
+      '[diff]\n\texternal = /bin/echo\n',
+      '[diff "mydriver"]\n\tcommand = /bin/echo\n',
+      '[diff "mydriver"]\n\ttextconv = /bin/echo\n',
+      '[diff.mydriver]\n\tcommand = /bin/echo\n',
+      '[diff.mydriver]\n\ttextconv = /bin/echo\n',
+    ];
+    for (const config of configs) {
+      const g = createGitFixture(config);
+      try {
+        const err = preflightGitRepository(g.root);
+        assert.notEqual(err, null);
+        if (err) assert.equal(err.code, 'dangerous-config');
+      } finally { g.cleanup(); }
+    }
   });
 
-  it('rejects pager and credential sections', () => {
-    const g1 = createGitFixture('[pager]\n\tlog = /bin/echo\n');
-    try {
-      assert.notEqual(preflightGitRepository(g1.root), null);
-    } finally { g1.cleanup(); }
-    const g2 = createGitFixture('[credential]\n\thelper = /bin/echo\n');
-    try {
-      assert.notEqual(preflightGitRepository(g2.root), null);
-    } finally { g2.cleanup(); }
+  it('rejects pager and credential sections, including a quoted credential subsection', () => {
+    const configs = [
+      '[pager]\n\tlog = /bin/echo\n',
+      '[credential]\n\thelper = /bin/echo\n',
+      '[credential "example"]\n\thelper = /bin/echo\n',
+    ];
+    for (const config of configs) {
+      const g = createGitFixture(config);
+      try {
+        const err = preflightGitRepository(g.root);
+        assert.notEqual(err, null);
+        if (err) assert.equal(err.code, 'dangerous-config');
+      } finally { g.cleanup(); }
+    }
   });
 
   it('rejects gpg and log.showSignature', () => {
@@ -259,13 +303,36 @@ describe('WP-7 Git: repository preflight', () => {
     }
   });
 
-  it('rejects malformed config', () => {
-    const g = createGitFixture('this is not a valid config line\n');
-    try {
-      const err = preflightGitRepository(g.root);
-      assert.notEqual(err, null);
-    } finally {
-      g.cleanup();
+  it('rejects malformed sections, keys, and unsupported quoted-subsection escapes', () => {
+    for (const config of [
+      'this is not a valid config line\n',
+      '[remote "origin" extra]\n\turl = https://example.invalid/project.git\n',
+      '[remote "origin"   ]\n\turl = https://example.invalid/project.git\n',
+      String.raw`[remote "ori\qgin"]
+	url = https://example.invalid/project.git
+`,
+      String.raw`[remote "origin\"]
+	url = https://example.invalid/project.git
+`,
+      String.raw`[remote "origin\]
+	url = https://example.invalid/project.git
+`,
+      '[remote "origin]\n\turl = https://example.invalid/project.git\n',
+      '[remote "ori\0gin"]\n\turl = https://example.invalid/project.git\n',
+      '[remote "ori"gin"]\n\turl = https://example.invalid/project.git\n',
+      '[remote origin]\n\turl = https://example.invalid/project.git\n',
+      '[credential example]\n\thelper = /bin/echo\n',
+      '[diff]\n\tdriver.command = /bin/echo\n',
+      '[diff]\n\tdriver.textconv = /bin/echo\n',
+    ]) {
+      const g = createGitFixture(config);
+      try {
+        const err = preflightGitRepository(g.root);
+        assert.notEqual(err, null);
+        if (err) assert.equal(err.code, 'malformed-config');
+      } finally {
+        g.cleanup();
+      }
     }
   });
 

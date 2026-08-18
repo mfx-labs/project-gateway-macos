@@ -10,7 +10,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, chmodSync, rmSync, writeFileSync, mkdirSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, chmodSync, rmSync, writeFileSync, mkdirSync, realpathSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -21,7 +21,7 @@ import { WorkspaceInspectionService } from '../../../src/reader/service.js';
 import { createMcpChangesRegistry, MCP_CHANGES_TOOLS, MAX_CHANGES_CONTENT_PATHS, MAX_CHANGES_PATH_LENGTH, MAX_CHANGES_REPORTED_FILES } from '../../../src/adapters/mcp/index.js';
 import type { ChangesResponse, McpChangesRegistry } from '../../../src/adapters/mcp/index.js';
 
-const GIT_BIN = '/home/chef/.local/git-2.45.4/bin/git';
+const GIT_BIN = ['/usr/bin/git', '/opt/homebrew/bin/git', '/usr/local/bin/git'].find((p) => existsSync(p)) ?? 'git';
 const WS = 'pgw:w:aaaaaaaaaaaaaaaa';
 
 function git(args: string[], root: string): void {
@@ -35,7 +35,7 @@ interface ChangesFixture {
 }
 
 async function makeChangesFixture(): Promise<ChangesFixture> {
-  const base = mkdtempSync(join(tmpdir(), 'wp14a-changes-'));
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'wp14a-changes-')));
   const root = join(base, 'workspace');
   const home = join(base, 'home');
   const tmp = join(base, 'tmpdir');
@@ -51,6 +51,9 @@ async function makeChangesFixture(): Promise<ChangesFixture> {
   writeFileSync(join(root, 'docs.md'), 'docs\n');
   git(['add', '.'], root);
   git(['commit', '-q', '-m', 'init'], root);
+  git(['remote', 'add', 'origin', 'https://example.invalid/project.git'], root);
+  git(['remote', 'add', 'ori"gin', 'https://example.invalid/quoted.git'], root);
+  git(['config', 'remote..url', 'https://example.invalid/empty.git'], root);
 
   const report = validateTrustedWorkspaceConfiguration(
     {
