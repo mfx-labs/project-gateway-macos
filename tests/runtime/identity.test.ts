@@ -35,18 +35,20 @@ import { TRUSTED_CONFIG_DIGEST_DOMAIN } from '../../src/trusted/identity.js';
 const REPO = join(import.meta.dirname, '..', '..', '..');
 const read = (rel: string): string => readFileSync(join(REPO, rel), 'utf8');
 
-test('MAC-2E: package identity is @project-gateway/macos-core with the single macOS bin', () => {
+test('MAC-2E: package identity is @project-gateway/macos-core with the accepted operator and runtime bins', () => {
   const pkg = JSON.parse(read('package.json')) as { name: string; version: string; bin: Record<string, string> };
   assert.equal(pkg.name, '@project-gateway/macos-core');
   // Version semantics remain unchanged in this slice.
   assert.equal(pkg.version, '0.1.0');
-  assert.deepEqual(Object.keys(pkg.bin), ['project-gateway-macos-mcp'], 'exactly one bin entry, no retained alias');
-  assert.equal(pkg.bin['project-gateway-macos-mcp'], './dist/runtime/mcp/cli.js');
+  const bin = pkg.bin ?? {};
+  assert.equal(bin['pgw'], './dist/operator/cli.js', 'operator CLI `pgw` maps to the operator entry');
+  assert.equal(bin['project-gateway-macos-mcp'], './dist/runtime/mcp/cli.js', 'MCP runtime maps to the runtime CLI entry');
+  assert.deepEqual(Object.keys(bin).sort(), ['pgw', 'project-gateway-macos-mcp'], 'exactly the two approved bin entries, no retained alias');
   // Lockfile mirrors only the mechanically required identity fields.
   const lock = JSON.parse(read('package-lock.json')) as { name: string; packages: Record<string, { name?: string; bin?: Record<string, string> }> };
   assert.equal(lock.name, '@project-gateway/macos-core');
   assert.equal(lock.packages['']?.name, '@project-gateway/macos-core');
-  assert.deepEqual(lock.packages['']?.bin, { 'project-gateway-macos-mcp': 'dist/runtime/mcp/cli.js' });
+  assert.deepEqual(lock.packages['']?.bin, { pgw: 'dist/operator/cli.js', 'project-gateway-macos-mcp': 'dist/runtime/mcp/cli.js' });
 });
 
 test('MAC-2E: CLI usage, diagnostics prefix, and bootstrap usage identify the macOS binary', () => {
