@@ -120,11 +120,14 @@ export function verifyMetadataModel(model: Readonly<Record<string, unknown>>, ex
     return { ok: false, code: 'ERR-STO-INTEGRITY', message: 'metadata namespace kind mismatch' };
   }
   const nsId = p['namespaceIdentity'] as Readonly<Record<string, unknown>>;
-  if (nsId === null || typeof nsId !== 'object' || nsId['dev'] !== expected.namespaceIdentity.dev || nsId['ino'] !== expected.namespaceIdentity.ino) {
+  // S1: persisted `dev` is NOT a durable equality requirement — APFS
+  // renumbers st_dev across reboot. The inode remains the durable same-object
+  // anchor alongside the canonical path; all other checks below are unchanged.
+  if (nsId === null || typeof nsId !== 'object' || nsId['ino'] !== expected.namespaceIdentity.ino) {
     return { ok: false, code: 'ERR-STO-INTEGRITY', message: 'metadata namespace identity mismatch' };
   }
   const parentId = p['parentIdentity'] as Readonly<Record<string, unknown>>;
-  if (parentId === null || typeof parentId !== 'object' || parentId['dev'] !== expected.parentIdentity.dev || parentId['ino'] !== expected.parentIdentity.ino) {
+  if (parentId === null || typeof parentId !== 'object' || parentId['ino'] !== expected.parentIdentity.ino) {
     return { ok: false, code: 'ERR-STO-INTEGRITY', message: 'metadata trusted-parent identity mismatch' };
   }
   if (p['lane'] !== expected.lane) {

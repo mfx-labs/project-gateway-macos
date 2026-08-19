@@ -183,6 +183,33 @@ test('metadata: wrong expected stable facts fail closed', () => {
   rmSync(env.dir, { recursive: true, force: true });
 });
 
+test('metadata: APFS st_dev drift is tolerated; inode remains the durable anchor (S1)', () => {
+  const env = makeEnv();
+  const facts = makeFacts(env.parent, 'configuration', env.ns);
+  const built = buildStoreMetadata(facts);
+  assert.equal(built.ok, true);
+  const path = join(env.dir, 'metadata', 'metadata.json');
+  assert.equal(persistMetadata(env.capability, path, built.metadata!, UID, join(env.dir, 'metadata'), env.dir).ok, true);
+  // Simulate APFS renumbering st_dev across reboot: the persisted metadata
+  // records one dev value while replay observes a different dev, with inode,
+  // canonical path, UID/mode, digests, and configuration identity all equal.
+  // Recorded dev drift alone must NOT fail durable verification (S1).
+  const devDrifted = replayMetadata(env.capability, path, {
+    ...facts,
+    namespaceIdentity: { ...env.ns, dev: env.ns.dev + 999 },
+    parentIdentity: { ...env.parent, dev: env.parent.dev + 999 },
+  }, UID);
+  assert.equal(devDrifted.ok, true, 'recorded dev drift must not fail durable verification');
+  // The inode remains the durable same-object anchor: inode drift still fails.
+  const inoDrifted = replayMetadata(env.capability, path, {
+    ...facts,
+    namespaceIdentity: { ...env.ns, ino: env.ns.ino + 1 },
+  }, UID);
+  assert.equal(inoDrifted.ok, false);
+  assert.equal(inoDrifted.code, 'ERR-STO-INTEGRITY');
+  rmSync(env.dir, { recursive: true, force: true });
+});
+
 test('metadata: limit-profile identity is verified exactly on replay (W8C-S01)', () => {
   const env = makeEnv();
   const facts = makeFacts(env.parent, 'configuration', env.ns);
