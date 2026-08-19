@@ -71,7 +71,8 @@
     "typescript": "7.0.2"
   },
   "bin": {
-    "project-gateway-macos-mcp": "./dist/runtime/mcp/cli.js"
+    "project-gateway-macos-mcp": "./dist/runtime/mcp/cli.js",
+    "pgw": "./dist/operator/cli.js"
   },
   "repository": {
     "type": "git",
