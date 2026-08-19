@@ -1,88 +1,112 @@
 #!/usr/bin/env node
 /**
- * S2 — operator CLI entry (`pgw`).
+ * S2/S3 — operator CLI entry (`pgw`).
  *
- * Dispatches the S2 surface only: `--version`, `add`, `list`, `remove`.
- * `start` / `doctor` / `uninstall` are recognized but not implemented in this
- * build (S3/S4). Bounded stderr diagnostics; stdout carries command results
- * only. No command framework or plugin system.
+ * Dispatches --version, add, list, remove (S2) and start, doctor (S3).
+ * `uninstall` remains not implemented until S4. Bounded stderr diagnostics;
+ * stdout carries command results only (and MCP protocol for `start`). No
+ * command framework or plugin system.
  */
 import { versionInfo, formatVersion } from './version.js';
+import { diagnostic } from './diagnostic.js';
 import { addProject } from './add.js';
 import { listProjects } from './list.js';
 import { removeProject } from './remove.js';
+import { runStart } from './start.js';
+import { runDoctor } from './doctor.js';
 
-const USAGE = 'usage: pgw --version | pgw add <path> | pgw list | pgw remove <path-or-id>';
+const USAGE = 'usage: pgw --version | pgw add <path> | pgw list | pgw remove <path-or-id> | pgw start | pgw doctor';
 
-function diagnostic(message: string): void {
-  const bounded = message.length > 2048 ? `${message.slice(0, 2048)}…(truncated)` : message;
-  process.stderr.write(`pgw: ${bounded.replace(/[\r\n]+/g, ' ')}\n`);
-}
-
-function main(): number {
+async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.length === 0) {
     diagnostic(USAGE);
-    return 2;
+    process.exitCode = 2;
+    return;
   }
   const command = argv[0]!;
   switch (command) {
     case '--version': {
       if (argv.length !== 1) {
         diagnostic('usage: pgw --version');
-        return 2;
+        process.exitCode = 2;
+        return;
       }
       process.stdout.write(`${formatVersion(versionInfo())}\n`);
-      return 0;
+      return;
     }
     case 'add': {
       if (argv.length !== 2) {
         diagnostic('usage: pgw add <path>');
-        return 2;
+        process.exitCode = 2;
+        return;
       }
       const result = addProject({ path: argv[1]! });
       if (!result.ok) {
         diagnostic(`add: ${result.message}`);
-        return 1;
+        process.exitCode = 1;
+        return;
       }
       process.stdout.write(result.alreadyRegistered ? `already registered ${result.id} ${result.path}\n` : `added ${result.id} ${result.path}\n`);
-      return 0;
+      return;
     }
     case 'list': {
       if (argv.length !== 1) {
         diagnostic('usage: pgw list');
-        return 2;
+        process.exitCode = 2;
+        return;
       }
       const result = listProjects();
       if (!result.ok) {
         diagnostic(`list: ${result.message}`);
-        return 1;
+        process.exitCode = 1;
+        return;
       }
       for (const project of result.projects) process.stdout.write(`${project.id} ${project.path}\n`);
-      return 0;
+      return;
     }
     case 'remove': {
       if (argv.length !== 2) {
         diagnostic('usage: pgw remove <path-or-id>');
-        return 2;
+        process.exitCode = 2;
+        return;
       }
       const result = removeProject({ selector: argv[1]! });
       if (!result.ok) {
         diagnostic(`remove: ${result.message}`);
-        return 1;
+        process.exitCode = 1;
+        return;
       }
       process.stdout.write(`removed ${result.removedId}\n`);
-      return 0;
+      return;
     }
-    case 'start':
-    case 'doctor':
+    case 'start': {
+      if (argv.length !== 1) {
+        diagnostic('usage: pgw start');
+        process.exitCode = 2;
+        return;
+      }
+      await runStart();
+      return;
+    }
+    case 'doctor': {
+      if (argv.length !== 1) {
+        diagnostic('usage: pgw doctor');
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = await runDoctor();
+      return;
+    }
     case 'uninstall':
-      diagnostic(`${command} is not implemented in this build`);
-      return 1;
+      diagnostic('uninstall is not implemented in this build');
+      process.exitCode = 1;
+      return;
     default:
       diagnostic(`unknown command: ${command}`);
-      return 2;
+      process.exitCode = 2;
+      return;
   }
 }
 
-process.exit(main());
+await main();

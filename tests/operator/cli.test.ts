@@ -92,12 +92,10 @@ test('cli: malformed invocations exit 2', async () => {
   assert.equal((await runCli(['bogus'])).code, 2);
 });
 
-test('cli: start/doctor/uninstall are recognized but not implemented (exit 1)', async () => {
-  for (const command of ['start', 'doctor', 'uninstall']) {
-    const r = await runCli([command]);
-    assert.equal(r.code, 1);
-    assert.match(r.stderr, /not implemented in this build/);
-  }
+test('cli: uninstall is recognized but not implemented (exit 1)', async () => {
+  const r = await runCli(['uninstall']);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /not implemented in this build/);
 });
 
 test('cli: pgw is the only operator bin; no project-gateway-macos alias', () => {
