@@ -21,3 +21,13 @@ export function defaultRegistryPath(): string {
 export function defaultStateBase(): string {
   return join(operatorHome(), '.local', 'state', 'project-gateway-macos');
 }
+
+/** Installed runtime root: `~/.local/share/project-gateway-macos/` (holds `current/`). */
+export function defaultInstallRoot(): string {
+  return join(operatorHome(), '.local', 'share', 'project-gateway-macos');
+}
+
+/** Operator CLI link: `~/.local/bin/pgw`. */
+export function defaultBinLink(): string {
+  return join(operatorHome(), '.local', 'bin', 'pgw');
+}

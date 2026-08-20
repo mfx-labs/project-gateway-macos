@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * S2/S3 — operator CLI entry (`pgw`).
+ * S2/S3/S4 — operator CLI entry (`pgw`).
  *
- * Dispatches --version, add, list, remove (S2) and start, doctor (S3).
- * `uninstall` remains not implemented until S4. Bounded stderr diagnostics;
- * stdout carries command results only (and MCP protocol for `start`). No
- * command framework or plugin system.
+ * Dispatches --version, add, list, remove (S2), start, doctor (S3), and
+ * uninstall (S4). Bounded stderr diagnostics; stdout carries command results
+ * only (and MCP protocol for `start`). No command framework or plugin system.
  */
 import { versionInfo, formatVersion } from './version.js';
 import { diagnostic } from './diagnostic.js';
@@ -14,8 +13,9 @@ import { listProjects } from './list.js';
 import { removeProject } from './remove.js';
 import { runStart } from './start.js';
 import { runDoctor } from './doctor.js';
+import { uninstall } from './uninstall.js';
 
-const USAGE = 'usage: pgw --version | pgw add <path> | pgw list | pgw remove <path-or-id> | pgw start | pgw doctor';
+const USAGE = 'usage: pgw --version | pgw add <path> | pgw list | pgw remove <path-or-id> | pgw start | pgw doctor | pgw uninstall';
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -98,10 +98,24 @@ async function main(): Promise<void> {
       process.exitCode = await runDoctor();
       return;
     }
-    case 'uninstall':
-      diagnostic('uninstall is not implemented in this build');
-      process.exitCode = 1;
+    case 'uninstall': {
+      if (argv.length !== 1) {
+        diagnostic('usage: pgw uninstall');
+        process.exitCode = 2;
+        return;
+      }
+      const result = uninstall();
+      if (!result.ok) {
+        diagnostic(`uninstall: ${result.message}`);
+        process.exitCode = 1;
+        return;
+      }
+      if (result.preservedBinLink) {
+        diagnostic('uninstall: kept ~/.local/bin/pgw (not the Gateway-owned symlink)');
+      }
+      process.stdout.write('uninstalled (registry and project state preserved)\n');
       return;
+    }
     default:
       diagnostic(`unknown command: ${command}`);
       process.exitCode = 2;

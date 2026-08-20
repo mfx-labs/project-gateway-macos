@@ -190,3 +190,8 @@ MAC-0 → MAC-1 → MAC-2 → MAC-3 → MAC-4 ─┐
   fail-closed test; release-candidate smoke.
 - **Gates:** human release decision (this gate does NOT push, tag,
   publish, release, install, or deploy).
+
+> **S4 note:** the operator/installer surface realizing MAC-7 is specified in
+> `docs/specs/operator-cli-and-installer-spec.md` and implemented under
+> `scripts/build-distributable.mjs` (builder), `scripts/install.mjs`
+> (standalone installer), and `src/operator/uninstall.ts` (`pgw uninstall`).

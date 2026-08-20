@@ -92,10 +92,12 @@ test('cli: malformed invocations exit 2', async () => {
   assert.equal((await runCli(['bogus'])).code, 2);
 });
 
-test('cli: uninstall is recognized but not implemented (exit 1)', async () => {
-  const r = await runCli(['uninstall']);
-  assert.equal(r.code, 1);
-  assert.match(r.stderr, /not implemented in this build/);
+test('cli: uninstall in an isolated home exits 0 and is idempotent', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pgw-cli-uninstall-'));
+  const r = await runCli(['uninstall'], { HOME: home });
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /uninstalled/);
+  rmSync(home, { recursive: true, force: true });
 });
 
 test('cli: pgw is the only operator bin; no project-gateway-macos alias', () => {

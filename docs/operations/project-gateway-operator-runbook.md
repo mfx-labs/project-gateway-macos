@@ -69,6 +69,29 @@ Pi 0.83.0 lane, and MUST NOT silently expand support (contract §16; see
 
 ## 2. Startup
 
+### 2.0 Operator flow (`pgw`)
+
+The independent operator CLI is `pgw` (see
+`docs/specs/operator-cli-and-installer-spec.md`). End-user flow:
+
+```text
+# one-time install (standalone release installer; there is no `pgw install`)
+node scripts/install.mjs project-gateway-macos-<version>-darwin-<arch>.tar.gz <sha256-sidecar>
+
+pgw --version
+pgw add <path>          # register + bootstrap a project store
+pgw list                # list registered projects
+pgw doctor              # read-only readiness check
+pgw start               # launch the MCP stdio runtime
+pgw remove <path-or-id> # deregister (store preserved)
+pgw uninstall           # remove runtime, preserve registry + stores
+```
+
+Layout: runtime at `~/.local/share/project-gateway-macos/current/`, CLI link
+`~/.local/bin/pgw`, registry `~/.config/project-gateway-macos/registry.json`,
+state `~/.local/state/project-gateway-macos/`. The bootstrap verb (§2.8) is
+invoked internally by `pgw add`; end users do not hand-run it.
+
 ### 2.1 Dependency installation
 
 From a clean checkout of the exact commit:
@@ -199,7 +222,7 @@ project-gateway-mcp bootstrap --config <file> [--output <file>]
 - **Trusted parent.** The `locator` directory must ALREADY exist as an
   operator-owned `0700` directory (the storage engine never creates
   parents). The operator provisions it (e.g. `mkdir -p -m 0700
-  <locator>`); pi-shuttle `project add` does this automatically.
+  <locator>`); `pgw add` does this automatically.
 - **Semantics.** Each surface is initialized through the accepted
   `initializeTrustedStore()` orchestrator: an absent store is provisioned;
   an already-initialized store is replayed verification-only (exact
@@ -214,13 +237,13 @@ project-gateway-mcp bootstrap --config <file> [--output <file>]
   identical bytes is an idempotent no-op, any other existing content is a
   typed conflict (`ERR-BOOT-OUTPUT-CONFLICT`) and is never overwritten.
   When `--output` is omitted, the resolved document is written to stdout
-  as a single JSON document (for `pi-shuttle` composition). No
+  as a single JSON document (for composition). No
   provenance, action identity, capability, or brand is ever serialized.
 - **Exit codes.** `0` success; `1` operational failure (config, store
   state, output); `2` malformed operands. Malformed/unknown arguments
   always fail closed.
 
-Typical flow (the `pi-shuttle project add` equivalent):
+Typical flow (what `pgw add` invokes internally):
 
 ```text
 mkdir -p -m 0700 <locator>

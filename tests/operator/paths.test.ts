@@ -5,11 +5,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { defaultRegistryPath, defaultStateBase } from '../../src/operator/paths.js';
+import { defaultBinLink, defaultInstallRoot, defaultRegistryPath, defaultStateBase } from '../../src/operator/paths.js';
 
 test('paths: registry/state use the fixed per-user layout', () => {
   assert.equal(defaultRegistryPath(), join(homedir(), '.config', 'project-gateway-macos', 'registry.json'));
   assert.equal(defaultStateBase(), join(homedir(), '.local', 'state', 'project-gateway-macos'));
+});
+
+test('paths: install root and bin link use the fixed per-user layout', () => {
+  assert.equal(defaultInstallRoot(), join(homedir(), '.local', 'share', 'project-gateway-macos'));
+  assert.equal(defaultBinLink(), join(homedir(), '.local', 'bin', 'pgw'));
 });
 
 test('paths: PGW_HOME has no effect on registry/state resolution', () => {
