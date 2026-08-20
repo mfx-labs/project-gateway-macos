@@ -154,8 +154,15 @@ test('security: production modules perform no hidden filesystem/network/process 
   // no-clobber config publish), that config reads flow through the accepted
   // loader, and that the boundary composes the trusted control-plane
   // bootstrap action without minting provenance; excluded here by boundary.
+  // S2+ operator CLI (src/operator): a dedicated host/composition boundary
+  // (registry reads/writes, project canonicalization, store bootstrap during
+  // `pgw add`, read-only inspection during `pgw doctor`, runtime composition
+  // during `pgw start`, install-layout handling, and `pgw uninstall`) that
+  // inherently requires node:fs / node:path / node:os; excluded here by
+  // boundary exactly as the runtime, writing, completion, and bootstrap
+  // composition roots above are.
   const prodFiles = walk(DIST)
-    .filter((p) => !p.includes('conformance') && !p.includes('/adapters/') && !p.includes('/reader/') && !p.includes('/git/') && !p.includes('/fff/') && !p.includes('/runtime/') && !p.includes('/writing/') && !p.includes('/internal/darwin-fs/') && !p.includes('/completion/') && !p.includes('/bootstrap/'))
+    .filter((p) => !p.includes('conformance') && !p.includes('/adapters/') && !p.includes('/reader/') && !p.includes('/git/') && !p.includes('/fff/') && !p.includes('/runtime/') && !p.includes('/writing/') && !p.includes('/internal/darwin-fs/') && !p.includes('/completion/') && !p.includes('/bootstrap/') && !p.includes('/operator/'))
     .filter((p) => !isStorageFsDelegatedModule(p));
   for (const p of prodFiles) {
     if (p.includes('runner.js') || p.includes('corpus-bundle')) continue;
