@@ -257,7 +257,34 @@ export function verifyGitRepository(workspaceRoot: string): PreflightError | nul
 
 import { createHash } from 'node:crypto';
 
-/** Security-relevant repository state captured at preflight time. */
+/** A bounded config read-unavailable reason. osCode carries only a short OS error code, never a raw message/stack/path. */
+export interface ConfigReadUnavailable {
+  readonly kind: 'config-read-unavailable';
+  readonly osCode?: string | null;
+}
+
+/** Bounded fail-closed read failures produced during preflight fingerprint capture. */
+export type PreflightReadFailure =
+  | ConfigReadUnavailable
+  | { readonly kind: 'repository-unreadable'; readonly osCode?: string | null };
+
+/**
+ * Trustworthy repository configuration fingerprint.
+ * A config that could not be read is NEVER represented here; capture fails closed instead.
+ */
+export type ConfigFingerprint =
+  | { readonly kind: 'absent' }
+  | {
+      readonly kind: 'present';
+      readonly dev: number;
+      readonly ino: number;
+      readonly size: number;
+      readonly mode: number;
+      readonly mtimeMs: number;
+      readonly sha256: string;
+    };
+
+/** Security-relevant repository state captured at preflight time (always trustworthy). */
 export interface RepositoryPreflightFingerprint {
   readonly dotGit: {
     readonly exists: boolean;
@@ -265,26 +292,64 @@ export interface RepositoryPreflightFingerprint {
     readonly ino: number;
     readonly mode: number;
   };
-  readonly config: {
-    readonly exists: boolean;
-    readonly dev: number;
-    readonly ino: number;
-    readonly size: number;
-    readonly mode: number;
-    readonly mtimeMs: number;
-    readonly sha256: string;
-  } | null;
+  readonly config: ConfigFingerprint;
   readonly commondirPresent: boolean;
   readonly alternatesPresent: boolean;
   readonly classification: 'regular' | 'not-a-repo';
 }
 
-function fileDigest(p: string): string | null {
+/** Capture outcome: a trustworthy fingerprint, or a bounded fail-closed read failure. */
+export type CaptureFingerprintResult =
+  | { readonly ok: true; readonly fingerprint: RepositoryPreflightFingerprint }
+  | { readonly ok: false; readonly failure: PreflightReadFailure };
+
+/** Revalidation outcome. config-read-unavailable and content-changed are semantically distinct. */
+export type RevalidationResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly kind: 'drift'; readonly reason: string }
+  | { readonly ok: false; readonly kind: 'config-read-unavailable'; readonly osCode?: string | null };
+
+function osCodeOf(err: unknown): string | null {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  return typeof code === 'string' ? code : null;
+}
+
+/**
+ * Test seam (mirrors WP-7's established *ForTest seams, e.g. buildEnvForTest / GLOBAL_ARGV_TEST):
+ * forces the next config read to fail with a bounded osCode so read-unavailable semantics can be
+ * tested deterministically for errnos that cannot be synthesized portably with real filesystem calls
+ * (EPERM, EIO, transient ENOENT race). Cleared to null after one use. Never affects normal behavior
+ * in production (no caller sets it).
+ */
+let forcedConfigReadFailure: ConfigReadUnavailable | null = null;
+export function __setForcedConfigReadFailureForTest(failure: ConfigReadUnavailable | null): void {
+  forcedConfigReadFailure = failure;
+}
+export function __consumeForcedConfigReadFailureForTest(): ConfigReadUnavailable | null {
+  const f = forcedConfigReadFailure;
+  forcedConfigReadFailure = null;
+  return f;
+}
+
+/** Test seam: forces fileDigest to return this digest (trustworthy, but independent of the real bytes) so the digest-comparison ('content changed') branch can be tested without metadata interference. */
+let forcedConfigDigest: string | null = null;
+export function __setForcedConfigDigestForTest(sha256: string | null): void {
+  forcedConfigDigest = sha256;
+}
+
+function fileDigest(p: string): { readonly ok: true; readonly sha256: string } | { readonly ok: false; readonly failure: ConfigReadUnavailable } {
+  const forcedFailure = __consumeForcedConfigReadFailureForTest();
+  if (forcedFailure) return { ok: false, failure: forcedFailure };
+  const forcedDigest = forcedConfigDigest;
+  if (forcedDigest !== null) {
+    forcedConfigDigest = null;
+    return { ok: true, sha256: forcedDigest };
+  }
   try {
     const data = readFileSync(p);
-    return createHash('sha256').update(data).digest('hex');
-  } catch {
-    return null;
+    return { ok: true, sha256: createHash('sha256').update(data).digest('hex') };
+  } catch (err) {
+    return { ok: false, failure: { kind: 'config-read-unavailable', osCode: osCodeOf(err) } };
   }
 }
 
@@ -295,36 +360,38 @@ function fileDigest(p: string): string | null {
  */
 export function captureRepositoryPreflightFingerprint(
   workspaceRoot: string,
-): RepositoryPreflightFingerprint | null {
+): CaptureFingerprintResult {
   const dotGit = join(workspaceRoot, '.git');
+  let gitStat;
   try {
-    const gitStat = statSync(dotGit);
-    const configPath = join(dotGit, 'config');
-    let config: RepositoryPreflightFingerprint['config'] = null;
-    try {
-      const st = statSync(configPath);
-      config = {
-        exists: true,
-        dev: st.dev,
-        ino: st.ino,
-        size: st.size,
-        mode: st.mode,
-        mtimeMs: st.mtimeMs,
-        sha256: fileDigest(configPath) ?? '',
-      };
-    } catch {
-      config = null; // no config file
-    }
-    return {
+    gitStat = statSync(dotGit);
+  } catch (err) {
+    return { ok: false, failure: { kind: 'repository-unreadable', osCode: osCodeOf(err) } };
+  }
+  const configPath = join(dotGit, 'config');
+  let config: ConfigFingerprint;
+  try {
+    const st = statSync(configPath);
+    const digest = fileDigest(configPath);
+    // Config is present but could not be read: this is read-unavailable, never a trustworthy fingerprint.
+    if (!digest.ok) return { ok: false, failure: digest.failure };
+    config = { kind: 'present', dev: st.dev, ino: st.ino, size: st.size, mode: st.mode, mtimeMs: st.mtimeMs, sha256: digest.sha256 };
+  } catch (err) {
+    // Legitimately absent only when stat reports ENOENT; any other stat failure is indeterminate.
+    const code = osCodeOf(err);
+    if (code === 'ENOENT') config = { kind: 'absent' };
+    else return { ok: false, failure: { kind: 'config-read-unavailable', osCode: code } };
+  }
+  return {
+    ok: true,
+    fingerprint: {
       dotGit: { exists: true, dev: gitStat.dev, ino: gitStat.ino, mode: gitStat.mode },
       config,
       commondirPresent: existsSync(join(dotGit, 'commondir')),
       alternatesPresent: existsSync(join(dotGit, 'objects', 'info', 'alternates')),
       classification: 'regular',
-    };
-  } catch {
-    return null;
-  }
+    },
+  };
 }
 
 /**
@@ -334,44 +401,48 @@ export function captureRepositoryPreflightFingerprint(
 export function revalidateRepositoryPreflightFingerprint(
   workspaceRoot: string,
   expected: RepositoryPreflightFingerprint,
-): string | null {
+): RevalidationResult {
+  const drift = (reason: string): RevalidationResult => ({ ok: false, kind: 'drift', reason });
   const dotGit = join(workspaceRoot, '.git');
   let gitStat;
   try {
     gitStat = statSync(dotGit);
   } catch {
-    return 'repository .git disappeared before launch';
+    return drift('repository .git disappeared before launch');
   }
   if (gitStat.dev !== expected.dotGit.dev || gitStat.ino !== expected.dotGit.ino || gitStat.mode !== expected.dotGit.mode) {
-    return '.git identity changed before launch';
+    return drift('.git identity changed before launch');
   }
   const commondirPresent = existsSync(join(dotGit, 'commondir'));
   if (commondirPresent !== expected.commondirPresent) {
-    return 'commondir state changed before launch';
+    return drift('commondir state changed before launch');
   }
   const alternatesPresent = existsSync(join(dotGit, 'objects', 'info', 'alternates'));
   if (alternatesPresent !== expected.alternatesPresent) {
-    return 'alternates state changed before launch';
+    return drift('alternates state changed before launch');
   }
   const configPath = join(dotGit, 'config');
   const configExists = existsSync(configPath);
-  if (expected.config === null) {
-    if (configExists) return '.git/config appeared before launch';
-    return null;
+  if (expected.config.kind === 'absent') {
+    if (configExists) return drift('.git/config appeared before launch');
+    return { ok: true };
   }
-  if (!configExists) return '.git/config disappeared before launch';
+  if (!configExists) return drift('.git/config disappeared before launch');
   let st;
   try {
     st = statSync(configPath);
-  } catch {
-    return '.git/config unreadable before launch';
+  } catch (err) {
+    return { ok: false, kind: 'config-read-unavailable', osCode: osCodeOf(err) };
   }
   if (st.dev !== expected.config.dev || st.ino !== expected.config.ino || st.size !== expected.config.size || st.mode !== expected.config.mode || st.mtimeMs !== expected.config.mtimeMs) {
-    return '.git/config changed before launch';
+    return drift('.git/config changed before launch');
   }
   const digest = fileDigest(configPath);
-  if (digest !== expected.config.sha256) {
-    return '.git/config content changed before launch';
+  if (!digest.ok) {
+    return { ok: false, kind: 'config-read-unavailable', osCode: digest.failure.osCode };
   }
-  return null;
+  if (digest.sha256 !== expected.config.sha256) {
+    return drift('.git/config content changed before launch');
+  }
+  return { ok: true };
 }

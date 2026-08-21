@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { initializeGitHostLane, parseGitVersion, revalidateGitHostLane, satisfiesGitMinimum, validateHostDirectory } from '../../../src/git/host-lane.js';
-import { preflightGitRepository, captureRepositoryPreflightFingerprint, revalidateRepositoryPreflightFingerprint, isUnbornRepository } from '../../../src/git/preflight.js';
+import { preflightGitRepository, captureRepositoryPreflightFingerprint, revalidateRepositoryPreflightFingerprint, isUnbornRepository, __setForcedConfigReadFailureForTest, __setForcedConfigDigestForTest } from '../../../src/git/preflight.js';
 import { GitInspectionService } from '../../../src/git/service.js';
 import { GLOBAL_ARGV_TEST, buildGitArgv } from '../../../src/git/wrapper.js';
 
@@ -173,9 +173,9 @@ describe('WP-7 Git: repository preflight', () => {
       assert.ok(config.includes('[remote ""]'));
       assert.ok(config.includes('[branch "main"]'));
       assert.equal(preflightGitRepository(g.root), null, '[remote] and [remote ""] must retain distinct identities');
-      const fingerprint = captureRepositoryPreflightFingerprint(g.root);
-      assert.notEqual(fingerprint, null);
-      if (fingerprint) assert.equal(revalidateRepositoryPreflightFingerprint(g.root, fingerprint), null);
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (cap.ok) assert.deepEqual(revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint), { ok: true });
     } finally {
       g.cleanup();
     }
@@ -391,13 +391,13 @@ describe('WP-7 Git: preflight fingerprint revalidation (S-04)', () => {
   it('detects .git/config mutation between preflight and launch', () => {
     const g = createGitFixture();
     try {
-      const fp = captureRepositoryPreflightFingerprint(g.root);
-      assert.notEqual(fp, null);
-      if (fp === null) return;
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (!cap.ok) return;
       // mutate config
       fs.appendFileSync(path.join(g.root, '.git', 'config'), '\n[core]\n\tfsmonitor = /bin/sh\n');
-      const drift = revalidateRepositoryPreflightFingerprint(g.root, fp);
-      assert.notEqual(drift, null);
+      const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+      assert.equal(reval.ok, false);
     } finally {
       g.cleanup();
     }
@@ -406,12 +406,12 @@ describe('WP-7 Git: preflight fingerprint revalidation (S-04)', () => {
   it('detects commondir appearing between preflight and launch', () => {
     const g = createGitFixture();
     try {
-      const fp = captureRepositoryPreflightFingerprint(g.root);
-      assert.notEqual(fp, null);
-      if (fp === null) return;
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (!cap.ok) return;
       fs.writeFileSync(path.join(g.root, '.git', 'commondir'), '../x\n');
-      const drift = revalidateRepositoryPreflightFingerprint(g.root, fp);
-      assert.notEqual(drift, null);
+      const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+      assert.equal(reval.ok, false);
     } finally {
       g.cleanup();
     }
@@ -420,16 +420,123 @@ describe('WP-7 Git: preflight fingerprint revalidation (S-04)', () => {
   it('detects alternates appearing between preflight and launch', () => {
     const g = createGitFixture();
     try {
-      const fp = captureRepositoryPreflightFingerprint(g.root);
-      assert.notEqual(fp, null);
-      if (fp === null) return;
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (!cap.ok) return;
       fs.mkdirSync(path.join(g.root, '.git', 'objects', 'info'), { recursive: true });
       fs.writeFileSync(path.join(g.root, '.git', 'objects', 'info', 'alternates'), '/x\n');
-      const drift = revalidateRepositoryPreflightFingerprint(g.root, fp);
-      assert.notEqual(drift, null);
+      const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+      assert.equal(reval.ok, false);
     } finally {
       g.cleanup();
     }
+  });
+});
+
+describe('WP-7 Git: config read-unavailable vs content drift (WP7-ERR-1)', () => {
+  it('CAPTURE EPERM: fail closed, config-read-unavailable, NO trustworthy fingerprint', () => {
+    const g = createGitFixture();
+    try {
+      __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode: 'EPERM' });
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, false);
+      if (!cap.ok) {
+        assert.equal(cap.failure.kind, 'config-read-unavailable');
+        assert.equal(cap.failure.osCode, 'EPERM');
+      }
+    } finally { g.cleanup(); }
+  });
+
+  it('REVALIDATION EPERM: config-read-unavailable, NOT content-changed', () => {
+    const g = createGitFixture();
+    try {
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (!cap.ok) return;
+      __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode: 'EPERM' });
+      const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+      assert.equal(reval.ok, false);
+      if (!reval.ok) {
+        assert.equal(reval.kind, 'config-read-unavailable');
+        assert.notEqual(reval.kind, 'drift');
+        assert.equal(reval.osCode, 'EPERM');
+      }
+    } finally { g.cleanup(); }
+  });
+
+  for (const osCode of ['EACCES', 'EIO']) {
+    it(`capture read-unavailable is truthful and fail-closed for ${osCode}`, () => {
+      const g = createGitFixture();
+      try {
+        __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode });
+        const cap = captureRepositoryPreflightFingerprint(g.root);
+        assert.equal(cap.ok, false);
+        if (!cap.ok) {
+          assert.equal(cap.failure.kind, 'config-read-unavailable');
+          assert.equal(cap.failure.osCode, osCode);
+        }
+      } finally { g.cleanup(); }
+    });
+    it(`revalidation read-unavailable for ${osCode} is NOT content-changed`, () => {
+      const g = createGitFixture();
+      try {
+        const cap = captureRepositoryPreflightFingerprint(g.root);
+        assert.equal(cap.ok, true);
+        if (!cap.ok) return;
+        __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode });
+        const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+        assert.equal(reval.ok, false);
+        if (!reval.ok) assert.equal(reval.kind, 'config-read-unavailable');
+      } finally { g.cleanup(); }
+    });
+  }
+
+  it('transient ENOENT race (stat ok, read ENOENT) is read-unavailable, NOT absent', () => {
+    const g = createGitFixture();
+    try {
+      const before = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(before.ok, true);
+      if (!before.ok) return;
+      __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode: 'ENOENT' });
+      const reval = revalidateRepositoryPreflightFingerprint(g.root, before.fingerprint);
+      assert.equal(reval.ok, false);
+      if (!reval.ok) assert.equal(reval.kind, 'config-read-unavailable');
+      // Present-but-unreadable must never be recorded as absent:
+      __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode: 'ENOENT' });
+      const cap2 = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap2.ok, false);
+    } finally { g.cleanup(); }
+  });
+
+  it('absent config -> fingerprint.config.kind === absent; revalidation unchanged', () => {
+    const g = createGitFixture();
+    try {
+      fs.rmSync(path.join(g.root, '.git', 'config'), { force: true });
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (cap.ok) {
+        assert.equal(cap.fingerprint.config.kind, 'absent');
+        const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+        assert.equal(reval.ok, true);
+      }
+    } finally { g.cleanup(); }
+  });
+
+  it('genuine content drift is still detected (digest changed)', () => {
+    const g = createGitFixture();
+    try {
+      const cap = captureRepositoryPreflightFingerprint(g.root);
+      assert.equal(cap.ok, true);
+      if (!cap.ok) return;
+      // Same file/metadata; force a different trustworthy digest so the digest-comparison branch fires.
+      __setForcedConfigDigestForTest('0'.repeat(64));
+      const reval = revalidateRepositoryPreflightFingerprint(g.root, cap.fingerprint);
+      assert.equal(reval.ok, false);
+      if (!reval.ok) {
+        assert.equal(reval.kind, 'drift');
+        assert.equal(reval.reason, '.git/config content changed before launch');
+      }
+    } finally { g.cleanup(); }
   });
 });
 
@@ -477,6 +584,14 @@ describe('WP-7 Git: service operations', () => {
     assert.equal(r.ok, true);
     const v = r.value as { records: readonly { path: string }[] };
     assert.ok(Array.isArray(v.records));
+  });
+
+  it('config read-unavailable fails closed: ERR-GIT-STATE-UNSUPPORTED and no Git child', async () => {
+    // Force the proven production read failure; status must NOT reach executeGit (no git child launch).
+    __setForcedConfigReadFailureForTest({ kind: 'config-read-unavailable', osCode: 'EPERM' });
+    const r = await service.status({ operation: 'git-status', workspaceId: WORKSPACE_ALPHA }, {});
+    assert.equal(r.ok, false, 'read-unavailable must fail closed');
+    if (!r.ok) assert.equal(r.failure.code, 'ERR-GIT-STATE-UNSUPPORTED');
   });
 
   it('git-status detects a modified tracked file', async () => {

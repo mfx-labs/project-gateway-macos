@@ -197,11 +197,12 @@ export class GitInspectionService {
       if (preflightErr.code === 'no-git-dir') return { ok: false, failure: fail(errGitNotRepo(corr)) };
       return { ok: false, failure: fail(errGitStateUnsupported(corr)) };
     }
-    const fingerprint = captureRepositoryPreflightFingerprint(root);
-    if (fingerprint === null) {
+    const capResult = captureRepositoryPreflightFingerprint(root);
+    // Capture read failure (e.g. config read-unavailable) fails closed to unsupported-state.
+    if (!capResult.ok) {
       return { ok: false, failure: fail(errGitStateUnsupported(corr)) };
     }
-    return { ok: true, fingerprint };
+    return { ok: true, fingerprint: capResult.fingerprint };
   }
 
   /**
@@ -219,9 +220,12 @@ export class GitInspectionService {
     if (revalidateGitHostLane(this.gitLane)) {
       return fail(errGitUnavailable(corr));
     }
-    // 2. Revalidate repository preflight fingerprint.
-    const drift = revalidateRepositoryPreflightFingerprint(root, fingerprint);
-    if (drift !== null) {
+    // 2. Revalidate repository preflight fingerprint. Content drift and a config
+    //    read-unavailable both fail closed to the contract-correct unsupported-state
+    //    code; they remain internally distinct, so a read failure is never reported
+    //    as content change.
+    const revalidation = revalidateRepositoryPreflightFingerprint(root, fingerprint);
+    if (!revalidation.ok) {
       return fail(errGitStateUnsupported(corr));
     }
     // 3. Confirm cancellation has not occurred.
