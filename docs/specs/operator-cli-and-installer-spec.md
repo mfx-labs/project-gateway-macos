@@ -225,7 +225,23 @@ at that point; nothing is invented now.
    - `locator` = `~/.local/state/project-gateway-macos/<id>/store/`,
    - `workspaces[]` = one entry `{ workspaceId: id, root: path }`,
    - `gitPath` = `/usr/bin/git`, `gitHome`/`gitTmpdir` = the derived dirs,
-   - `configurationVersion` = a fixed product constant.
+   - `configurationVersion` = a fixed product constant: **version `'2'`**
+     (see Version-2 operator contract below), with a deterministic
+     per-workspace `artifactLocation` = `join(root, 'artifacts')` presented
+     in `workspaces[]` as `{ workspaceId, root, artifactLocation }`.
+
+**Version-2 operator contract.** The operator runtime emits a version-2
+trusted workspace configuration (`CONFIGURATION_VERSION = '2'` in
+`src/operator/surface.ts`) carrying a workspace-local `artifacts` artifact
+location — the accepted version-2 persist convention used by
+mac2f/mac3e/wp14b. This is required because
+`evaluateProspectiveArtifactDestination` accepts only
+`TRUSTED_CONFIGURATION_VERSION_2` (TAD-002) and `persist-artifact` requires a
+configured artifact location (TAD-004). `add` provisions the `artifacts`
+directory. Authority boundaries are unchanged: persistence remains
+proposal-only, create-only, destination-derived, containment-bound, and
+independently revalidated; the artifact directory creates no lifecycle fact.
+TAD-002 is not weakened.
 4. Invoke `bootstrapStore` per surface (idempotent replay — the store is
    already initialized by `add`; zero writes) to obtain the resolved
    runtime configuration including the derived `configurationIdentity`.

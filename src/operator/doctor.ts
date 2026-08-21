@@ -10,7 +10,7 @@
  */
 import { realpathSync, statSync } from 'node:fs';
 import { loadRegistry } from './registry.js';
-import { deriveRuntimeSurface, GIT_PATH } from './surface.js';
+import { deriveRuntimeSurface, GIT_PATH, createOperatorArtifactLocationResolver } from './surface.js';
 import {
   CAPABILITY_VOCABULARY_VERSION,
   TRUSTED_SOURCE_KIND,
@@ -104,7 +104,7 @@ export async function runDoctor(): Promise<number> {
         configurationVersion: facts.configurationVersion,
         capabilityVocabularyVersion: CAPABILITY_VOCABULARY_VERSION,
         provenance: { sourceKind: TRUSTED_SOURCE_KIND },
-        workspaces: [{ workspaceId: facts.workspaceId, root: facts.root }],
+        workspaces: [{ workspaceId: facts.workspaceId, root: facts.root, artifactLocation: facts.artifactLocation }],
       },
       {
         hostLane,
@@ -115,6 +115,7 @@ export async function runDoctor(): Promise<number> {
             return null;
           }
         },
+        resolveArtifactLocation: createOperatorArtifactLocationResolver(),
       },
     );
     if (!validation.ok || validation.configuration === undefined) {

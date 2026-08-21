@@ -17,7 +17,7 @@ import { realpathSync, readFileSync } from 'node:fs';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { diagnostic } from './diagnostic.js';
 import { loadRegistry } from './registry.js';
-import { deriveRuntimeSurface } from './surface.js';
+import { deriveRuntimeSurface, createOperatorArtifactLocationResolver } from './surface.js';
 import {
   CAPABILITY_VOCABULARY_VERSION,
   TRUSTED_SOURCE_KIND,
@@ -67,7 +67,7 @@ export async function runStart(): Promise<void> {
         configurationVersion: facts.configurationVersion,
         capabilityVocabularyVersion: CAPABILITY_VOCABULARY_VERSION,
         provenance: { sourceKind: TRUSTED_SOURCE_KIND },
-        workspaces: [{ workspaceId: facts.workspaceId, root: facts.root }],
+        workspaces: [{ workspaceId: facts.workspaceId, root: facts.root, artifactLocation: facts.artifactLocation }],
       },
       {
         hostLane,
@@ -78,6 +78,7 @@ export async function runStart(): Promise<void> {
             return null;
           }
         },
+        resolveArtifactLocation: createOperatorArtifactLocationResolver(),
       },
     );
     if (!validation.ok || validation.configuration === undefined) {
@@ -106,6 +107,7 @@ export async function runStart(): Promise<void> {
       workspaces: validation.configuration.workspaces.map((w) => ({
         workspaceId: w.workspaceId,
         root: w.canonicalRoot,
+        ...(w.artifactLocation !== undefined ? { artifactLocation: w.artifactLocation } : {}),
       })),
       gitPath: facts.gitPath,
       gitHome: facts.gitHome,
