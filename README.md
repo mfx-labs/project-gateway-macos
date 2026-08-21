@@ -26,23 +26,33 @@ be explicitly registered before they are exposed.
 ## Closed operator surface
 
 ```
-pgw --version
-pgw add <path>
-pgw list
-pgw remove <path-or-id>
-pgw doctor
+pgw help
+pgw tunnel
+pgw up
 pgw start
-pgw uninstall
+pgw doctor
+pgw project add <path>
+pgw project list
+pgw project remove <path-or-workspace-id>
+pgw --version
 ```
+
+`pgw add / list / remove` remain available as legacy top-level aliases for
+`pgw project add / list / remove`.
 
 | Command | Purpose |
 | --- | --- |
-| `pgw add <path>` | Registers a project and initializes its controlled local Gateway store. |
-| `pgw list` | Lists registered projects. |
-| `pgw remove <path-or-id>` | Deregisters a project while preserving its store/state. |
+| `pgw help` | Shows the canonical command surface. |
+| `pgw tunnel` | One-time install/configure of the macOS tunnel workflow (pinned tunnel-client, profile, Keychain credential). |
+| `pgw up` | Starts the configured tunnel + Gateway stack in the foreground (macOS). |
+| `pgw start` | Starts the low-level Gateway stdio MCP runtime; verifies existing state; does not provision or repair the store. |
 | `pgw doctor` | Performs a read-only readiness check. |
-| `pgw start` | Launches the stdio MCP runtime; verifies existing state; does not provision or repair the store. |
-| `pgw uninstall` | Removes the installed runtime/link; preserves registry, project state, stores. |
+| `pgw project add <path>` | Registers a project and initializes its controlled local Gateway store. |
+| `pgw project list` | Lists registered projects. |
+| `pgw project remove <path-or-workspace-id>` | Deregisters a project while preserving its store/state. |
+
+Normal tunnel users do not call `pgw start` directly; it is invoked as the MCP
+child by the tunnel run. `pgw --version` prints version information.
 
 There is no `pgw install` command; installation is performed by the standalone
 installer script described below.
@@ -121,6 +131,79 @@ pgw start
 
 `pgw start` is a stdio MCP server process, so it is normally launched by an MCP
 client/transport integration rather than used as an interactive shell command.
+
+## Tunnel workflow (macOS, manual foreground)
+
+Project Gateway's local tunnel uses the upstream
+[`openai/tunnel-client`](https://github.com/openai/tunnel-client) release in
+front of `pgw start`. The supported macOS startup model is an interactive
+Terminal running the tunnel in the foreground — no login item, no LaunchAgent,
+no background service is installed.
+
+### First-time PGW install
+
+Install/configure `pgw` using the normal repository instructions
+([Installation](#installation-v010)).
+
+### Discover commands
+
+```sh
+pgw help
+```
+
+### First-time tunnel setup
+
+One-time per machine. Installs the pinned `tunnel-client` binary, records your
+tunnel identity in a tunnel-client profile, and stores your Runtime API Key in
+the macOS Keychain.
+
+1. create or select an OpenAI **Tunnel** in the OpenAI Platform.
+2. create a **Runtime API Key** with the required Tunnels Read + Use permission
+   (https://platform.openai.com/settings/organization/api-keys).
+3. run:
+
+   ```sh
+   pgw tunnel
+   ```
+
+   You will be prompted for the tunnel ID and (if not already stored) the
+   Runtime API Key. The key is entered with echoing hidden and is never
+   printed or written to any file, profile, log, or shell history — it lives
+   only in the macOS Keychain.
+
+   Setup is safe to re-run: it skips installation, reuses an existing tunnel
+   identity/profile, and reuses an existing Keychain credential.
+
+### Normal use
+
+Each foreground session:
+
+```sh
+pgw up
+```
+
+`pgw up` reads the tunnel identity and the Runtime API Key (from the macOS
+Keychain) and launches the tunnel in the foreground
+(`tunnel-client run --profile project-gateway`, which starts `pgw start`). It is
+the canonical normal-use command and never installs or provisions anything.
+
+If `pgw up` reports the tunnel is not configured, run `pgw tunnel` first.
+
+### Low-level MCP runtime
+
+Normal users do not need to invoke `pgw start` directly; tunnel-client starts it
+as the MCP child during `pgw up`.
+
+For repository discoverability / fallback, a thin wrapper is provided that
+delegates to `pgw up`:
+
+```sh
+./scripts/start-project-gateway-macos.sh
+```
+
+### Stop
+
+Press `Ctrl+C` in the Terminal running the tunnel.
 
 ## MCP surface
 

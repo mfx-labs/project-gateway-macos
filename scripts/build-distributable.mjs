@@ -96,6 +96,14 @@ try {
   chmodSync(join(assembly, 'dist', 'operator', 'cli.js'), 0o755);
   chmodSync(join(assembly, 'dist', 'runtime', 'mcp', 'cli.js'), 0o755);
 
+  // 6.5 package the tunnel setup helpers for `pgw tunnel` (resolved relative
+  // to the installed package root; the setup script sources tunnel-client-common.sh
+  // next to itself, so both must ship together).
+  mkdirSync(join(assembly, 'scripts'), { recursive: true });
+  cpSync(join(ROOT, 'scripts', 'setup-tunnel-client-macos.sh'), join(assembly, 'scripts', 'setup-tunnel-client-macos.sh'));
+  cpSync(join(ROOT, 'scripts', 'tunnel-client-common.sh'), join(assembly, 'scripts', 'tunnel-client-common.sh'));
+  chmodSync(join(assembly, 'scripts', 'setup-tunnel-client-macos.sh'), 0o755);
+
   // 7. tarball (system tar)
   const tar = spawnSync('/usr/bin/tar', ['-czf', join(outDir, tarball), '-C', assembly, '.'], { stdio: 'inherit' });
   if (tar.status !== 0) {

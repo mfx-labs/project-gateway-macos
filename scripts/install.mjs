@@ -107,6 +107,8 @@ const required = [
   'bin/project-gateway-macos-mcp',
   'dist/operator/cli.js',
   `native/${lane}/gateway_fs.node`,
+  'scripts/setup-tunnel-client-macos.sh',
+  'scripts/tunnel-client-common.sh',
 ];
 const missing = required.filter((p) => !existsSync(join(staging, p)));
 if (missing.length > 0) {

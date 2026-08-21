@@ -79,10 +79,30 @@ test('cli: add + list + remove end-to-end in an isolated home', async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
-test('cli: pgw project ... is rejected (exit 2)', async () => {
-  const r = await runCli(['project', 'add', '/x']);
-  assert.equal(r.code, 2);
-  assert.match(r.stderr, /unknown command: project/);
+test('cli: pgw project ... routes to add/list/remove', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'pgw-cli-project-'));
+  const project = join(home, 'project');
+  mkdirSync(project);
+  const id = projectIdFromPath(realpathSync(project));
+
+  const add = await runCli(['project', 'add', project], { HOME: home });
+  assert.equal(add.code, 0);
+  assert.match(add.stdout, new RegExp(`^added ${id} `));
+
+  const list = await runCli(['project', 'list'], { HOME: home });
+  assert.equal(list.code, 0);
+  assert.match(list.stdout, new RegExp(`^${id} `));
+
+  const remove = await runCli(['project', 'remove', id], { HOME: home });
+  assert.equal(remove.code, 0);
+  assert.match(remove.stdout, new RegExp(`^removed ${id}\n$`));
+
+  // unknown subcommand rejected
+  const bogus = await runCli(['project', 'bogus'], { HOME: home });
+  assert.equal(bogus.code, 2);
+  assert.match(bogus.stderr, /usage: pgw project/);
+
+  rmSync(home, { recursive: true, force: true });
 });
 
 test('cli: malformed invocations exit 2', async () => {
