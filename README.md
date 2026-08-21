@@ -45,41 +45,76 @@ Runtime API Key securely in the macOS Keychain.
 
 ## Install pgw
 
-There is no `pgw install` command. Installation is done with the standalone
-installer script.
+There is no `pgw install` command. Install with the one-command bootstrap
+installer below and nothing to fill in.
 
-Download the artifacts for your architecture from the
-[v0.2.0 release](https://github.com/mfx-labs/project-gateway-macos/releases/tag/v0.2.0):
-
-```
-project-gateway-macos-0.2.0-darwin-x64.tar.gz        (+ .sha256)
-project-gateway-macos-0.2.0-darwin-arm64.tar.gz      (+ .sha256)
-```
-
-Get the installer from a checkout of the `v0.2.0` tag, then run it with the
-tarball and its SHA-256 sidecar:
+**One command.** Paste this into a Terminal:
 
 ```sh
-git clone --branch v0.2.0 --depth 1 \
-  https://github.com/mfx-labs/project-gateway-macos.git
-
-cd project-gateway-macos
-
-node scripts/install.mjs \
-  /path/to/project-gateway-macos-0.2.0-darwin-x64.tar.gz \
-  /path/to/project-gateway-macos-0.2.0-darwin-x64.tar.gz.sha256
+(
+  tmp="$(mktemp "${TMPDIR:-/tmp}/pgw-install.XXXXXX")" &&
+  trap 'rm -f "$tmp"' EXIT &&
+  curl -fsSL \
+    https://raw.githubusercontent.com/mfx-labs/project-gateway-macos/main/install.sh \
+    -o "$tmp" &&
+  [ -s "$tmp" ] &&
+  bash "$tmp"
+)
 ```
 
-On Apple Silicon, use the `-darwin-arm64-` tarball and sidecar instead. Verify
-the tarball SHA-256 against its sidecar before use.
+The installer resolves the current stable release, detects your Mac's
+architecture, downloads the matching checksummed release payload, verifies
+it, and installs the `pgw` command. The command stays the same for every
+release — you never need to change it when a new version is published.
 
 After installing, check it works:
 
 ```sh
 pgw --version
+pgw help
 ```
 
-You may need to add `~/.local/bin` to your `PATH`.
+You may need to add `~/.local/bin` to your `PATH` — the installer tells you
+if so.
+
+Next, set up the tunnel once:
+
+```sh
+pgw tunnel
+pgw project add ~/Documents/MyProject
+```
+
+Then see [Set up the tunnel](#set-up-the-tunnel-once) below.
+
+### Manual install (advanced / fallback)
+
+Most people don't need this — the one-command install above is the supported
+path. If you prefer to install from a source checkout, clone the `v0.2.0`
+tag, detect your architecture, download the matching release tarball and its
+SHA-256 sidecar, and run the standalone installer:
+
+```sh
+git clone --branch v0.2.0 --depth 1 \
+  https://github.com/mfx-labs/project-gateway-macos.git
+cd project-gateway-macos
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) PLATFORM="x64" ;;
+  arm64)  PLATFORM="arm64" ;;
+  *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+BASE="https://github.com/mfx-labs/project-gateway-macos/releases/download/v0.2.0"
+TARBALL="project-gateway-macos-0.2.0-darwin-${PLATFORM}.tar.gz"
+curl -fL -o "$TARBALL"        "$BASE/$TARBALL"
+curl -fL -o "$TARBALL.sha256" "$BASE/$TARBALL.sha256"
+
+node scripts/install.mjs "$PWD/$TARBALL" "$PWD/$TARBALL.sha256"
+```
+
+The installer verifies the tarball against its SHA-256 sidecar before
+installing.
 
 ## Set up the tunnel (once)
 
