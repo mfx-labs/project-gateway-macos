@@ -89,12 +89,12 @@ Then see [Set up the tunnel](#set-up-the-tunnel-once) below.
 ### Manual install (advanced / fallback)
 
 Most people don't need this — the one-command install above is the supported
-path. If you prefer to install from a source checkout, clone the `v0.2.0`
+path. If you prefer to install from a source checkout, clone the `v0.2.1`
 tag, detect your architecture, download the matching release tarball and its
 SHA-256 sidecar, and run the standalone installer:
 
 ```sh
-git clone --branch v0.2.0 --depth 1 \
+git clone --branch v0.2.1 --depth 1 \
   https://github.com/mfx-labs/project-gateway-macos.git
 cd project-gateway-macos
 
@@ -105,8 +105,8 @@ case "$ARCH" in
   *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-BASE="https://github.com/mfx-labs/project-gateway-macos/releases/download/v0.2.0"
-TARBALL="project-gateway-macos-0.2.0-darwin-${PLATFORM}.tar.gz"
+BASE="https://github.com/mfx-labs/project-gateway-macos/releases/download/v0.2.1"
+TARBALL="project-gateway-macos-0.2.1-darwin-${PLATFORM}.tar.gz"
 curl -fL -o "$TARBALL"        "$BASE/$TARBALL"
 curl -fL -o "$TARBALL.sha256" "$BASE/$TARBALL.sha256"
 
@@ -376,7 +376,7 @@ write, or arbitrary Git-execution tool.
 
 ### Supported lanes and validation status
 
-| Lane | v0.2.0 status |
+| Lane | v0.2.1 status |
 | --- | --- |
 | macOS Intel x86_64 | Physical reboot acceptance passed |
 | macOS Apple Silicon arm64 | Packaging/static validation passed; physical execution not performed |

@@ -1,6 +1,6 @@
 {
   "name": "@project-gateway/macos-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Consumer-neutral Artifact Core library: deterministic validation and protocol evaluation for the Project Gateway artifact protocol (WP-0..WP-3).",
   "private": true,
   "type": "module",
