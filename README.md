@@ -27,10 +27,6 @@ pgw up
 That's the whole daily loop. Everything below explains each step in a little
 more detail.
 
-> **Note:** `pgw tunnel` and `pgw up` are currently available on `main` and
-> will be included in the next release. The published v0.1.0 release predates
-> them.
-
 ## What you need
 
 - **A Mac** running macOS.
@@ -52,31 +48,26 @@ Runtime API Key securely in the macOS Keychain.
 There is no `pgw install` command. Installation is done with the standalone
 installer script.
 
-> **Release status:** the `pgw tunnel` / `pgw up` workflow documented on this
-> page is currently available on `main` and will be included in the next
-> release. The current published release, v0.1.0, predates these commands, so a
-> v0.1.0 install will not provide them.
-
 Download the artifacts for your architecture from the
-[v0.1.0 release](https://github.com/mfx-labs/project-gateway-macos/releases/tag/v0.1.0):
+[v0.2.0 release](https://github.com/mfx-labs/project-gateway-macos/releases/tag/v0.2.0):
 
 ```
-project-gateway-macos-0.1.0-darwin-x64.tar.gz        (+ .sha256)
-project-gateway-macos-0.1.0-darwin-arm64.tar.gz      (+ .sha256)
+project-gateway-macos-0.2.0-darwin-x64.tar.gz        (+ .sha256)
+project-gateway-macos-0.2.0-darwin-arm64.tar.gz      (+ .sha256)
 ```
 
-Get the installer from a checkout of the `v0.1.0` tag, then run it with the
+Get the installer from a checkout of the `v0.2.0` tag, then run it with the
 tarball and its SHA-256 sidecar:
 
 ```sh
-git clone --branch v0.1.0 --depth 1 \
+git clone --branch v0.2.0 --depth 1 \
   https://github.com/mfx-labs/project-gateway-macos.git
 
 cd project-gateway-macos
 
 node scripts/install.mjs \
-  /path/to/project-gateway-macos-0.1.0-darwin-x64.tar.gz \
-  /path/to/project-gateway-macos-0.1.0-darwin-x64.tar.gz.sha256
+  /path/to/project-gateway-macos-0.2.0-darwin-x64.tar.gz \
+  /path/to/project-gateway-macos-0.2.0-darwin-x64.tar.gz.sha256
 ```
 
 On Apple Silicon, use the `-darwin-arm64-` tarball and sidecar instead. Verify
@@ -350,7 +341,7 @@ write, or arbitrary Git-execution tool.
 
 ### Supported lanes and validation status
 
-| Lane | v0.1.0 status |
+| Lane | v0.2.0 status |
 | --- | --- |
 | macOS Intel x86_64 | Physical reboot acceptance passed |
 | macOS Apple Silicon arm64 | Packaging/static validation passed; physical execution not performed |

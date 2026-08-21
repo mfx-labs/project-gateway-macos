@@ -172,6 +172,9 @@ check "install lands in per-user HOME (no sudo)"      '[[ -x "$WORK/.local/bin/t
 check "profile project-gateway created"               '[[ -f "$WORK/.config/tunnel-client/project-gateway.yaml" ]]'
 check "profile contains secret reference, not literal" 'grep -q "api_key: \"env:CONTROL_PLANE_API_KEY\"" "$WORK/.config/tunnel-client/project-gateway.yaml"'
 check "profile contains no literal runtime secret"     '! grep -q "sk-testsecret" "$WORK/.config/tunnel-client/project-gateway.yaml"'
+check "profile stdio command keeps channel main as metadata" 'grep -q "channel: main" "$WORK/.config/tunnel-client/project-gateway.yaml"'
+check "profile stdio command is <pgw> start (no ,channel=main)" 'grep -qF "command: \"$WORK/.local/bin/pgw start\"" "$WORK/.config/tunnel-client/project-gateway.yaml"'
+check "profile stdio command has no ,channel=main" '! grep -q ",channel=main" "$WORK/.config/tunnel-client/project-gateway.yaml"'
 check "setup prints completion + canonical start command" 'echo "$OUT" | grep -q "pgw up"'
 
 # checksum mismatch fails closed (fresh HOME, wrong pinned sha, file seam)
@@ -207,6 +210,72 @@ if [[ $RC -eq 0 ]]; then
 else
   note "invalid tunnel id rejected"
 fi
+
+# malformed profile repair: v0.2.0 RC wrote `,channel=main` inside the stdio
+# command; setup must detect and recreate its own owned profile, preserving
+# the tunnel id, env credential reference, and channel-main metadata.
+WORKR="$TMP/repair"; mkdir -p "$WORKR/.local/bin" "$WORKR/secstore" "$WORKR/.config/tunnel-client"
+make_fake_pgw "$WORKR/.local/bin/pgw"
+make_fake_tc "$WORKR/.local/bin/tunnel-client"
+printf 'sk-testsecret' > "$WORKR/secstore/key"
+cat > "$WORKR/.config/tunnel-client/project-gateway.yaml" <<YAML
+config_version: 1
+control_plane:
+  base_url: "https://api.openai.com"
+  tunnel_id: "$VALID_ID"
+  api_key: "env:CONTROL_PLANE_API_KEY"
+health:
+  listen_addr: "127.0.0.1:0"
+mcp:
+  commands:
+    - channel: main
+      command: "$WORKR/.local/bin/pgw start,channel=main"
+YAML
+OUT="$(HOME="$WORKR" XDG_CONFIG_HOME="$WORKR/.config" CONTROL_PLANE_TUNNEL_ID="$VALID_ID" \
+  TC_TEST_URL_BASE="unused" TC_TEST_SHA="unused" TC_TEST_SECSTORE="$WORKR/secstore" \
+  run_scenario)"; RC=$?
+check "malformed profile repair exits 0 (rc=$RC)" '[[ $RC -eq 0 ]]'
+check "malformed profile repaired: no ,channel=main remains" '! grep -q ",channel=main" "$WORKR/.config/tunnel-client/project-gateway.yaml"'
+check "malformed profile repaired: command is clean <pgw> start" 'grep -qF "command: \"$WORKR/.local/bin/pgw start\"" "$WORKR/.config/tunnel-client/project-gateway.yaml"'
+check "malformed profile repair keeps channel main metadata" 'grep -q "channel: main" "$WORKR/.config/tunnel-client/project-gateway.yaml"'
+check "malformed profile repair preserves env reference" 'grep -q "api_key: \"env:CONTROL_PLANE_API_KEY\"" "$WORKR/.config/tunnel-client/project-gateway.yaml"'
+check "malformed profile repair preserves tunnel id" 'grep -q "tunnel_id.*$VALID_ID" "$WORKR/.config/tunnel-client/project-gateway.yaml"'
+
+# ---- 3b. cleanup regression: no `tmpdir: unbound variable` under set -u --------
+# Direct production execution runs with `set -euo pipefail` (nounset). A past
+# defect left a RETURN trap referencing a function-local `tmpdir` that fired on a
+# later unrelated function return, tripping nounset AFTER a successful setup. The
+# sourced-path scenarios above do not enable nounset, so these run under `set -u`
+# to replicate the direct-execution condition and lock the regression.
+run_scenario_u() { (
+    set -euo pipefail
+    TC_BIN="${HOME}/.local/bin/tunnel-client"
+    PGW_BIN="${HOME}/.local/bin/pgw"
+    apply_seam; setup_main
+) 2>&1; }
+
+# A/C/D — fresh install under nounset completes, cleans its temp dir, no unbound.
+WORKU="$TMP/inst-u"; mkdir -p "$WORKU/.local/bin" "$WORKU/secstore"
+make_fake_pgw "$WORKU/.local/bin/pgw"
+printf 'sk-testsecret' > "$WORKU/secstore/key"
+TMPDIRU="$TMP/tmp-u"; mkdir -p "$TMPDIRU"
+OUT="$(HOME="$WORKU" XDG_CONFIG_HOME="$WORKU/.config" TMPDIR="$TMPDIRU" CONTROL_PLANE_TUNNEL_ID="$VALID_ID" \
+  TC_TEST_URL_BASE="http://127.0.0.1:$PORT" TC_TEST_SHA="$ZIP_SHA" TC_TEST_SECSTORE="$WORKU/secstore" \
+  run_scenario_u)"; RC=$?
+check "nounset fresh install exits 0 (rc=$RC)" '[[ $RC -eq 0 ]]'
+check "nounset fresh install: no unbound variable" '! echo "$OUT" | grep -q "unbound variable"'
+check "nounset fresh install completes setup" 'echo "$OUT" | grep -q "Setup complete"'
+check "nounset fresh install cleans temp dir" '[[ -z "$(find "$TMPDIRU" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]'
+
+# B/E — reuse path under nounset completes, no temp dir, no unbound.
+TMPDIRU2="$TMP/tmp-u2"; mkdir -p "$TMPDIRU2"
+OUT="$(HOME="$WORK" TMPDIR="$TMPDIRU2" CONTROL_PLANE_TUNNEL_ID="$VALID_ID" \
+  TC_TEST_URL_BASE="unused" TC_TEST_SHA="unused" TC_TEST_SECSTORE="$WORK/secstore" \
+  run_scenario_u)"; RC=$?
+check "nounset reuse path exits 0 (rc=$RC)" '[[ $RC -eq 0 ]]'
+check "nounset reuse path: no unbound variable" '! echo "$OUT" | grep -q "unbound variable"'
+check "nounset reuse path reuses install" 'echo "$OUT" | grep -q "already installed — skipped"'
+check "nounset reuse path creates no temp dir" '[[ -z "$(find "$TMPDIRU2" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]'
 
 # ---- 4. manual-start wrapper (thin; delegates to `pgw up`) ----------------
 # 4a. wrapper contains no independent startup implementation

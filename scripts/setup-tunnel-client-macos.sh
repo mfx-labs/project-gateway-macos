@@ -69,7 +69,11 @@ setup_main() {
     expected="$(tc_expected_sha_for_arch "$ARCH")"
     local tmpdir
     tmpdir="$(mktemp -d)"
-    trap 'rm -rf "$tmpdir"' RETURN
+    # Remove the temp download/extract dir when it exists, safely under `set -u`.
+    # The `${tmpdir:-}` guards make the trap a no-op if it ever fires after this
+    # function's local `tmpdir` is out of scope (bash RETURN traps are not scoped
+    # to the defining function and would otherwise trip nounset on a later return).
+    trap '[[ -n "${tmpdir:-}" && -d "${tmpdir:-}" ]] && rm -rf "${tmpdir}"' RETURN
     zip="${tmpdir}/tunnel-client.zip"
 
     tc_download "$url" "$zip"
@@ -85,6 +89,11 @@ setup_main() {
     chmod +x "$tmpbin"
     mv -f "$tmpbin" "$TC_BIN"
     echo "installed ${TC_BIN}"
+    # Clean up and disarm the RETURN trap once install is complete so it cannot
+    # fire on a later unrelated function return (e.g. setup_main) referencing an
+    # out-of-scope `tmpdir` under `set -u`.
+    rm -rf "$tmpdir"
+    trap - RETURN
   }
   install_tunnel_client
 
@@ -114,7 +123,18 @@ setup_main() {
 
   # --- 5. create/reuse the upstream profile ----------------------------------
   ensure_profile() {
-    if [[ -f "$PROFILE_FILE" ]] \
+    # A structurally valid profile binds the MCP command as `<pgw> start` with
+    # `channel: main` carried as transport metadata. v0.2.0 RC wrote
+    # `,channel=main` into the command string, which the stdio child then
+    # received as `start,channel=main` (pgw: unknown command). Detect and repair
+    # only our owned project-gateway profile; never touch unrelated profiles,
+    # the Keychain credential, or the tunnel identity.
+    local repair=""
+    if [[ -f "$PROFILE_FILE" ]] && grep -q ',channel=main' "$PROFILE_FILE"; then
+      repair=1
+    fi
+    if [[ -z "$repair" ]] \
+      && [[ -f "$PROFILE_FILE" ]] \
       && grep -q "tunnel_id.*${TUNNEL_ID}" "$PROFILE_FILE" \
       && grep -q 'api_key: "env:CONTROL_PLANE_API_KEY"' "$PROFILE_FILE" \
       && grep -qF "$PGW_BIN" "$PROFILE_FILE"; then
@@ -122,11 +142,15 @@ setup_main() {
       return
     fi
 
+    [[ -n "$repair" ]] && echo "project-gateway profile has malformed MCP command — recreating"
+
     $TC_BIN init \
       --profile "$TC_PROFILE_NAME" \
       --tunnel-id "$TUNNEL_ID" \
-      --mcp-command "$PGW_BIN start,channel=main" \
-      --health-listen-addr 127.0.0.1:0 >/dev/null \
+      --mcp-command "$PGW_BIN start" \
+      --health-listen-addr 127.0.0.1:0 \
+      --control-plane-api-key-ref "env:CONTROL_PLANE_API_KEY" \
+      --force >/dev/null \
       || tc_fail "tunnel-client init failed (profile $TC_PROFILE_NAME)"
     echo "created profile ${PROFILE_FILE}"
   }

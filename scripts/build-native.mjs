@@ -36,6 +36,21 @@ mkdirSync(destDir, { recursive: true });
 const dest = join(destDir, 'gateway_fs.node');
 rmSync(dest, { force: true });
 copyFileSync(src, dest);
+
+// Release-binary hygiene (build-path metadata): strip non-runtime local
+// symbol/debug metadata from the STAGED binary so the packaged artifact does
+// not embed the build host's absolute path (e.g. STABS N_SO file-path records
+// such as /Users/<user>/.../native/src/gateway_fs.c). The addon's exported
+// NAPI entry symbols are global and are preserved by `strip -x`; local symbols
+// and stab/debug records that carry the build path are removed. A failure to
+// strip fails the build (fail closed) — never continue with an unstripped
+// release binary.
+const strip = spawnSync('/usr/bin/strip', ['-x', dest], { stdio: 'inherit' });
+if (strip.status !== 0) {
+  console.error(`strip -x failed (${ARCH}) — refusing to stage an unstripped release binary`);
+  process.exit(strip.status ?? 1);
+}
+
 const sha = createHash('sha256').update(readFileSync(dest)).digest('hex');
 console.log(`staged ${dest}`);
 console.log(`sha256 ${sha}`);
