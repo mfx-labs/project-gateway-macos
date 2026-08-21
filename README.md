@@ -1,80 +1,61 @@
 # Project Gateway for macOS
 
-Project Gateway for macOS is a local, standalone gateway that exposes explicitly
-registered project workspaces through a constrained MCP artifact interface. It is a
-standalone macOS distribution with its own operator CLI.
+Project Gateway connects ChatGPT to project folders you choose on your Mac,
+through a controlled local gateway. You decide which projects to register, and
+Project Gateway limits what it can do to a small, controlled set of operations.
 
-## The `pgw` operator
+It runs on your Mac, in the foreground, under your control. You start it when
+you want to use it and stop it with `Ctrl+C`.
 
-`pgw` manages local project registration, readiness verification, runtime startup,
-and application uninstall. It ships as an architecture-specific standalone
-distribution and runs only on macOS.
+## Quick start
 
-**What Project Gateway macOS is not:**
+First-time setup (once):
 
-- a generic filesystem MCP
-- a shell-execution MCP
-- a generic Git-automation MCP
-- an authority self-approval mechanism
-- a package manager
-- a daemon
-
-Model-accessible MCP tools do **not** grant unrestricted local filesystem authority.
-Gateway operations are constrained to the accepted artifact model, and projects must
-be explicitly registered before they are exposed.
-
-## Closed operator surface
-
-```
-pgw help
+```sh
 pgw tunnel
-pgw up
-pgw start
-pgw doctor
-pgw project add <path>
-pgw project list
-pgw project remove <path-or-workspace-id>
-pgw --version
+pgw project add ~/Documents/MyProject
 ```
 
-`pgw add / list / remove` remain available as legacy top-level aliases for
-`pgw project add / list / remove`.
+Normal use:
 
-| Command | Purpose |
-| --- | --- |
-| `pgw help` | Shows the canonical command surface. |
-| `pgw tunnel` | One-time install/configure of the macOS tunnel workflow (pinned tunnel-client, profile, Keychain credential). |
-| `pgw up` | Starts the configured tunnel + Gateway stack in the foreground (macOS). |
-| `pgw start` | Starts the low-level Gateway stdio MCP runtime; verifies existing state; does not provision or repair the store. |
-| `pgw doctor` | Performs a read-only readiness check. |
-| `pgw project add <path>` | Registers a project and initializes its controlled local Gateway store. |
-| `pgw project list` | Lists registered projects. |
-| `pgw project remove <path-or-workspace-id>` | Deregisters a project while preserving its store/state. |
+```sh
+pgw up
+```
 
-Normal tunnel users do not call `pgw start` directly; it is invoked as the MCP
-child by the tunnel run. `pgw --version` prints version information.
+**Stop:** press `Ctrl+C`.
 
-There is no `pgw install` command; installation is performed by the standalone
-installer script described below.
+That's the whole daily loop. Everything below explains each step in a little
+more detail.
 
-## Requirements
+> **Note:** `pgw tunnel` and `pgw up` are currently available on `main` and
+> will be included in the next release. The published v0.1.0 release predates
+> them.
 
-- macOS
-- Node.js >= 22
-- Git >= 2.30
+## What you need
 
-### Architectures and validation status
+- **A Mac** running macOS.
+- **`pgw` installed** — the Project Gateway command-line tool (see
+  [Install pgw](#install-pgw)).
+- **Node.js ≥ 22** — required to run the installer script.
+- **A Tunnel ID** — created in the OpenAI Platform (see below).
+- **A Runtime API Key** with the tunnel permissions it needs — created in the
+  OpenAI Platform.
+- **Terminal access** — `pgw` is a command-line tool that runs in the
+  foreground.
 
-| Lane | v0.1.0 status |
-| --- | --- |
-| macOS Intel x86_64 | Physical reboot acceptance passed |
-| macOS Apple Silicon arm64 | Packaging/static validation passed; physical execution not performed |
+You create the Tunnel and the Runtime API Key once, on the OpenAI Platform.
+Project Gateway saves the tunnel configuration for later use, and stores your
+Runtime API Key securely in the macOS Keychain.
 
-Intel x86_64 was physically validated through installation, project registration, a
-physical reboot, post-reboot `doctor`, post-reboot `start`, MCP initialization, and
-uninstall. Apple Silicon arm64 was **not** physically executed for v0.1.0.
+## Install pgw
 
-## Installation (v0.1.0)
+There is no `pgw install` command. Installation is done with the standalone
+installer script.
+
+> **Release status:** the `pgw tunnel` / `pgw up` workflow documented on this
+> page is currently available on `main` and will be included in the next
+> release. The current published release, v0.1.0, predates these commands, so a
+> v0.1.0 install will not provide them.
 
 Download the artifacts for your architecture from the
 [v0.1.0 release](https://github.com/mfx-labs/project-gateway-macos/releases/tag/v0.1.0):
@@ -84,9 +65,8 @@ project-gateway-macos-0.1.0-darwin-x64.tar.gz        (+ .sha256)
 project-gateway-macos-0.1.0-darwin-arm64.tar.gz      (+ .sha256)
 ```
 
-The standalone installer is `scripts/install.mjs`. The four published release assets
-are the two tarballs and two SHA-256 sidecars; the installer is obtained from a
-checkout of the `v0.1.0` tag:
+Get the installer from a checkout of the `v0.1.0` tag, then run it with the
+tarball and its SHA-256 sidecar:
 
 ```sh
 git clone --branch v0.1.0 --depth 1 \
@@ -94,162 +74,305 @@ git clone --branch v0.1.0 --depth 1 \
 
 cd project-gateway-macos
 
-# Download the matching tarball + .sha256 from the v0.1.0 release, then:
-
 node scripts/install.mjs \
   /path/to/project-gateway-macos-0.1.0-darwin-x64.tar.gz \
   /path/to/project-gateway-macos-0.1.0-darwin-x64.tar.gz.sha256
 ```
 
-For Apple Silicon, substitute the `-darwin-arm64-` tarball and sidecar. Verify the
-tarball SHA-256 against its sidecar before use.
+On Apple Silicon, use the `-darwin-arm64-` tarball and sidecar instead. Verify
+the tarball SHA-256 against its sidecar before use.
 
-### Install and state layout
-
-| Item | Path |
-| --- | --- |
-| Runtime | `~/.local/share/project-gateway-macos/current/` |
-| Operator | `~/.local/bin/pgw` |
-| Registry | `~/.config/project-gateway-macos/registry.json` |
-| State | `~/.local/state/project-gateway-macos/` |
-
-You may need to add `~/.local/bin` to your `PATH`.
-
-## Quick start
+After installing, check it works:
 
 ```sh
 pgw --version
-
-pgw add ~/Documents/my-project
-
-pgw list
-
-pgw doctor
-
-pgw start
 ```
 
-`pgw start` is a stdio MCP server process, so it is normally launched by an MCP
-client/transport integration rather than used as an interactive shell command.
+You may need to add `~/.local/bin` to your `PATH`.
 
-## Tunnel workflow (macOS, manual foreground)
+## Set up the tunnel (once)
 
-Project Gateway's local tunnel uses the upstream
-[`openai/tunnel-client`](https://github.com/openai/tunnel-client) release in
-front of `pgw start`. The supported macOS startup model is an interactive
-Terminal running the tunnel in the foreground — no login item, no LaunchAgent,
-no background service is installed.
-
-### First-time PGW install
-
-Install/configure `pgw` using the normal repository instructions
-([Installation](#installation-v010)).
-
-### Discover commands
+Run:
 
 ```sh
-pgw help
+pgw tunnel
 ```
 
-### First-time tunnel setup
+You normally run this **once per machine**. `pgw tunnel`:
 
-One-time per machine. Installs the pinned `tunnel-client` binary, records your
-tunnel identity in a tunnel-client profile, and stores your Runtime API Key in
-the macOS Keychain.
+- checks that your system is a supported macOS / architecture;
+- installs (or reuses) the pinned `tunnel-client`;
+- configures the `project-gateway` tunnel profile;
+- accepts and validates your Tunnel ID;
+- stores (or reuses) your Runtime API Key in the macOS Keychain;
+- verifies the result.
 
-1. create or select an OpenAI **Tunnel** in the OpenAI Platform.
-2. create a **Runtime API Key** with the required Tunnels Read + Use permission
-   (https://platform.openai.com/settings/organization/api-keys).
-3. run:
+Before you run it, create these on the OpenAI Platform:
 
-   ```sh
-   pgw tunnel
-   ```
+1. A **Tunnel** (OpenAI Platform → Tunnels).
+2. A **Runtime API Key** with the required **Tunnels Read + Use** permission:
+   <https://platform.openai.com/settings/organization/api-keys>.
 
-   You will be prompted for the tunnel ID and (if not already stored) the
-   Runtime API Key. The key is entered with echoing hidden and is never
-   printed or written to any file, profile, log, or shell history — it lives
-   only in the macOS Keychain.
+The command will ask you for the Tunnel ID and, if it isn't already stored,
+the Runtime API Key. The key is entered with echoing hidden. It is persisted
+only in the macOS Keychain — it is not stored in the repository, in the tunnel
+profile as a literal secret, or in logs.
 
-   Setup is safe to re-run: it skips installation, reuses an existing tunnel
-   identity/profile, and reuses an existing Keychain credential.
+Rerunning `pgw tunnel` is safe: it skips what's already installed, reuses your
+tunnel identity, and reuses an existing Keychain credential.
 
-### Normal use
+## Register a project
 
-Each foreground session:
+Register the folders you want Project Gateway to work with:
+
+```sh
+pgw project add ~/Documents/MyProject
+```
+
+See what's registered:
+
+```sh
+pgw project list
+```
+
+A few notes:
+
+- Your tunnel identity and your project registry are **separate things**. The
+  tunnel connects ChatGPT to Project Gateway; the registry is the list of
+  project folders Project Gateway is allowed to work with.
+- Project operations are scoped to projects you explicitly register. Project
+  Gateway does **not** expose your whole Mac.
+- The workspace ID shown by some commands is an internal operational
+  identifier. Normal users don't need it for tunnel setup or for `pgw up`.
+
+## Start Project Gateway
 
 ```sh
 pgw up
 ```
 
-`pgw up` reads the tunnel identity and the Runtime API Key (from the macOS
-Keychain) and launches the tunnel in the foreground
-(`tunnel-client run --profile project-gateway`, which starts `pgw start`). It is
-the canonical normal-use command and never installs or provisions anything.
+One command starts the configured tunnel and the Project Gateway stack in the
+foreground on your Mac.
 
-If `pgw up` reports the tunnel is not configured, run `pgw tunnel` first.
+- Keep the Terminal window open while you're using Project Gateway.
+- Press `Ctrl+C` to stop.
 
-### Low-level MCP runtime
+For normal use you do not need to run `tunnel-client` or `pgw start` manually —
+`pgw up` handles all of that for you.
 
-Normal users do not need to invoke `pgw start` directly; tunnel-client starts it
-as the MCP child during `pgw up`.
+## Day to day
 
-For repository discoverability / fallback, a thin wrapper is provided that
-delegates to `pgw up`:
+After first-time setup, normal use is simply:
 
 ```sh
-./scripts/start-project-gateway-macos.sh
+pgw up
 ```
 
-### Stop
-
-Press `Ctrl+C` in the Terminal running the tunnel.
-
-## MCP surface
-
-The runtime exposes exactly nine MCP tools:
-
-- `draft-artifact`
-- `enumerate-class`
-- `inspect-audit-history`
-- `inspect-changes`
-- `inspect-registry`
-- `inspect-stored-record`
-- `persist-artifact`
-- `validate-artifact`
-- `verify-record`
-
-There is no generic shell, filesystem-write, or arbitrary Git-execution tool, and no
-approval/issue/activate/execute tool.
-
-## Safety and trust boundary
-
-- Projects must be explicitly registered before any Gateway operation applies.
-- Operations are constrained to the accepted artifact model.
-- `pgw doctor` and startup verification fail closed.
-- `pgw start` does not silently repair or provision missing stores.
-- Model-accessible MCP tools cannot approve, issue, or activate their own authority.
-
-## Uninstall
+Add another project only when you need it:
 
 ```sh
-pgw uninstall
+pgw project add ~/Documents/AnotherProject
 ```
 
-**Removed:** the installed runtime and the canonical Gateway `pgw` link.
+See your current projects:
 
-**Preserved:** the project registry, Gateway state, initialized stores, and project
-files.
+```sh
+pgw project list
+```
 
-`pgw remove` is separate from uninstall: it deregisters a single project while
-preserving its store/state.
+**Stop:** press `Ctrl+C`.
 
-## Documentation
+## Command cheat sheet
+
+| Command | What it does |
+| --- | --- |
+| `pgw help` | Show the available commands. |
+| `pgw tunnel` | One-time tunnel setup (install/reuse tunnel-client, profile, Keychain credential). |
+| `pgw up` | Start the complete configured Gateway stack in the foreground. |
+| `pgw project add <path>` | Register a project. |
+| `pgw project list` | List registered projects. |
+| `pgw project remove <path-or-workspace-id>` | Deregister a project. |
+| `pgw doctor` | Check your installation / runtime state. |
+| `pgw start` | Low-level MCP stdio runtime; normally not run manually for tunnel use. |
+| `pgw --version` | Show the installed version. |
+
+`pgw add`, `pgw list`, and `pgw remove` also still work as shortcuts for their
+`pgw project …` forms, but `pgw project …` is the documented workflow.
+
+## How it works
+
+At a high level:
+
+```text
+ChatGPT
+   |
+   v
+secure tunnel
+   |
+   v
+Project Gateway on your Mac
+   |
+   v
+registered projects
+```
+
+In more detail, one `pgw up` session looks like this:
+
+```text
+pgw up
+  -> tunnel-client
+       -> pgw start
+```
+
+- `pgw up` is the orchestration — it sets up the tunnel connection for the
+  session.
+- `pgw start` is the low-level MCP runtime that Project Gateway actually uses
+  to serve the registered projects over that connection.
+
+There is no background service or always-on daemon. Project Gateway runs only
+when you run `pgw up`, and it stops when you press `Ctrl+C`.
+
+## Security at a glance
+
+- **You choose what Project Gateway can touch.** Project-facing operations are
+  scoped to projects you explicitly register, performed through a constrained
+  set of operations — Project Gateway is not a general file, shell, or
+  Git-automation tool.
+- **Your Runtime API Key is stored in the macOS Keychain.** It is persisted in
+  the Keychain, not stored literally in your tunnel profile or the repository,
+  and it is never printed.
+- **The tunnel client is pinned and verified.** `tunnel-client` is pinned to a
+  specific version and its checksum is verified before it is installed.
+- **Runs in the foreground, under your control.** No LaunchAgent or autostart
+  is installed by this workflow; `Ctrl+C` stops the running session.
+
+For deeper detail, see the [Advanced / engineering](#advanced--engineering)
+section and the linked documentation below.
+
+## Troubleshooting
+
+**"`pgw up` says tunnel setup is incomplete."**
+
+Run the one-time setup again — it's safe and idempotent:
+
+```sh
+pgw tunnel
+```
+
+**"My project isn't available."**
+
+Check what's registered:
+
+```sh
+pgw project list
+```
+
+If it's missing, register it:
+
+```sh
+pgw project add <path>
+```
+
+**"I want to verify my installation."**
+
+```sh
+pgw doctor
+```
+
+**"I want to stop Project Gateway."**
+
+Press `Ctrl+C` in the Terminal running `pgw up`.
+
+**"`pgw tunnel` is asking for a Tunnel ID / Runtime API Key."**
+
+These come from the OpenAI Platform. Create (or open) a Tunnel, and create a
+Runtime API Key with **Tunnels Read + Use** permission, then paste the values
+when prompted:
+
+- Tunnel ID: OpenAI Platform → Tunnels. It looks like `tunnel_` followed by
+  32 hex characters.
+- Runtime API Key: <https://platform.openai.com/settings/organization/api-keys>
+
+The key is entered with echoing hidden and stored in the macOS Keychain.
+
+Operators and developers can find more granular checks in the
+[operator runbook](docs/operations/project-gateway-operator-runbook.md).
+
+## Updating and removing projects
+
+To stop Project Gateway from working with a project:
+
+```sh
+pgw project remove <path-or-workspace-id>
+```
+
+Removing a project from Project Gateway does **not** delete your project
+files. It only deregisters the project and preserves its local store.
+
+Removing Project Gateway itself (uninstall) is not part of the canonical user
+workflow; see the
+[operator & installer documentation](docs/specs/operator-cli-and-installer-spec.md)
+for uninstall and removal details.
+
+## Advanced / engineering
+
+Everything above is written for end users. The material below is for operators,
+developers, and readers who want the engineering details. The repository keeps
+its work packages, decisions, and specifications under [`docs/`](docs/),
+including:
 
 - [Operator CLI & installer spec](docs/specs/operator-cli-and-installer-spec.md)
 - [Operator runbook](docs/operations/project-gateway-operator-runbook.md)
+- [macOS product contract](docs/macos-product-contract.md)
 - [Physical reboot acceptance summary](docs/reports/physical-reboot-acceptance-summary.md)
 - [Releases](https://github.com/mfx-labs/project-gateway-macos/releases)
+
+### Constrained operation surface
+
+Project Gateway is deliberately not a generic tool. It is:
+
+- not a generic filesystem MCP
+- not a shell-execution MCP
+- not a generic Git-automation MCP
+- not an authority self-approval mechanism
+- not a package manager
+- not a daemon
+
+Its model-accessible MCP tools do **not** grant unrestricted local filesystem
+authority. Operations are constrained to the accepted artifact model, and a
+project must be explicitly registered before it is exposed.
+
+For reference, the runtime exposes nine MCP tools: `draft-artifact`,
+`enumerate-class`, `inspect-audit-history`, `inspect-changes`,
+`inspect-registry`, `inspect-stored-record`, `persist-artifact`,
+`validate-artifact`, `verify-record`. There is no generic shell, filesystem-
+write, or arbitrary Git-execution tool.
+
+### Supported lanes and validation status
+
+| Lane | v0.1.0 status |
+| --- | --- |
+| macOS Intel x86_64 | Physical reboot acceptance passed |
+| macOS Apple Silicon arm64 | Packaging/static validation passed; physical execution not performed |
+
+Debugging and hardening details (fail-closed checks, store/state layout,
+recovery and audit behavior) live in the linked specifications and reports.
+
+## Development / contributing
+
+This section is for people building Project Gateway, not for end users.
+
+From a checkout, the committed development path is:
+
+```sh
+npm ci
+npm run build
+npm run typecheck
+```
+
+Run the tests with `npm test`. The installer spec and operator runbook describe
+the runtime layout (`~/.local/share/project-gateway-macos/current/`,
+`~/.local/bin/pgw`, registry, and state) and the release/validation process.
 
 ## License
 
